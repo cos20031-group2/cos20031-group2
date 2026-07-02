@@ -115,7 +115,9 @@ CREATE TABLE Vehicle (
     OperationalStatus SMALLINT UNSIGNED NOT NULL,
     CONSTRAINT FK_Vehicle_Category FOREIGN KEY (CategoryID) REFERENCES VehicleCategory(VehicleCategoryID),
     CONSTRAINT FK_Vehicle_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
-    CONSTRAINT FK_Vehicle_Status FOREIGN KEY (OperationalStatus) REFERENCES VehicleStatus(VehicleStatusID)
+    CONSTRAINT FK_Vehicle_Status FOREIGN KEY (OperationalStatus) REFERENCES VehicleStatus(VehicleStatusID),
+    CONSTRAINT CHK_Vehicle_VIN_Length CHECK (CHAR_LENGTH(VIN) = 17),
+    CONSTRAINT CHK_Vehicle_Year CHECK (YearOfManufacture >= 1980)
 );
 
 CREATE TABLE Driver (
@@ -125,6 +127,7 @@ CREATE TABLE Driver (
     CurrentDepotID SMALLINT UNSIGNED NULL,
     EmploymentStatus ENUM('Active', 'Inactive', 'Suspended', 'Terminated') NOT NULL,
     EmergencyContactDetails VARCHAR(255) NOT NULL,
+    DrivingEligibility ENUM('Eligible', 'Suspended - Pending Review', 'Suspended - Pending Training') DEFAULT 'Eligible' NOT NULL,
     -- Licenses and certifications will be tracked in the DriverCertification table, allowing for multiple certifications per driver. Therefore there is no default license type or certification field here.
     CONSTRAINT FK_Driver_Depot FOREIGN KEY (CurrentDepotID) REFERENCES Depot(DepotID),
     CONSTRAINT CHK_Driver_DriverID_Prefix CHECK (DriverID LIKE 'D-%')
@@ -155,7 +158,11 @@ CREATE TABLE VehicleAssignment (
     CONSTRAINT FK_VA_Vehicle FOREIGN KEY (VIN) REFERENCES Vehicle(VIN),
     CONSTRAINT FK_VA_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
     CONSTRAINT FK_VA_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
-    CONSTRAINT CHK_VA_Dates CHECK (EndDate IS NULL OR EndDate >= IssueDate)
+    CONSTRAINT CHK_VA_Dates CHECK (EndDate IS NULL OR EndDate >= IssueDate),
+    CONSTRAINT CHK_VA_ActiveConsistency CHECK (
+            (IsActive = TRUE  AND EndDate IS NULL) OR
+            (IsActive = FALSE AND EndDate IS NOT NULL) -- Ensures that if the assignment is active, the EndDate must be NULL, and if it's inactive, the EndDate must be set.
+)
 );
 
 CREATE TABLE SafetyEvent (
@@ -176,7 +183,7 @@ CREATE TABLE SafetyEvent (
     CONSTRAINT CHK_SE_EventID_Prefix CHECK (EventID LIKE 'E%')
 );
 
-CREATE TABLE CoachingRecord (
+CREATE TABLE CoachingRecord ( -- No link to SafetyEvent, as coaching can be initiated for reasons other than a specific event (e.g., general performance review, proactive safety training, etc.), or it can be linked to multiple events making it impractical to link via a single field.
     CoachingRecordID INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     DriverID VARCHAR(20) NOT NULL,
     CoachingType ENUM('Safety Coaching', 'Retraining', 'Licence Review') NOT NULL,
@@ -208,7 +215,8 @@ CREATE TABLE MaintenanceJob (
     CONSTRAINT FK_MJ_Workshop FOREIGN KEY (WorkshopID) REFERENCES Workshop(WorkshopID),
     CONSTRAINT CHK_MJ_JobID_Prefix CHECK (JobID LIKE 'M%'),
     CONSTRAINT CHK_MJ_Dates CHECK (DateClosed IS NULL OR DateClosed >= DateOpened),
-    CONSTRAINT CHK_MJ_Downtime CHECK (Downtime >= 0)
+    CONSTRAINT CHK_MJ_Downtime CHECK (Downtime >= 0),
+    CONSTRAINT CHK_MJ_ClosedHasCost CHECK (DateClosed IS NULL OR TotalCost IS NOT NULL) -- If the job is closed, there must be a total cost recorded. If the job is still open, the total cost can be NULL.
 );
 
 CREATE TABLE MaintenanceActivity (
@@ -242,7 +250,16 @@ CREATE TABLE DriverCertification (
     CONSTRAINT FK_DC_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
     CONSTRAINT FK_DC_CertType FOREIGN KEY (DriverCertificationTypeID) REFERENCES DriverCertificationType(DriverCertificationTypeID),
     CONSTRAINT CHK_DC_Dates CHECK (ExpiryDate > IssueDate),
-    CONSTRAINT CHK_DC_RevocationDate CHECK (RevocationDate IS NULL OR RevocationDate >= IssueDate)
+    CONSTRAINT CHK_DC_RevocationDate CHECK (RevocationDate IS NULL OR (RevocationDate >= IssueDate AND RevocationDate IS NOT NULL AND RevocationDate <= ExpiryDate)), -- Ensures that if a certification is revoked, the revocation date cannot be before the issue date or after the expiry date.
+    CONSTRAINT CHK_DC_StatusConsistency CHECK (
+        (Status = 'Active' AND RevocationDate IS NULL) OR -- Ensures that if a certification is active, it has not been revoked.
+        (Status = 'Revoked' AND RevocationDate IS NOT NULL) OR -- Ensures that if a certification is revoked, there must be a revocation date.
+        (Status = 'Expired') OR
+        -- A certificate can be voided regardless of dates. If it is voided, it is considered invalid and ALL past transactions are invalidated. This is usefull for checking historical data in VehicleAssignment table, as it allows for the invalidation of all past transactions associated with a voided certificate.
+        -- The revocation date can be set to either NULL or a valid date in this case, as the voiding of the certificate is independent of the revocation process, meaning it can be revoked and then be voided, or it can be voided without being revoked.
+        (Status = 'Voided') OR
+        (Status = 'Reinstated' AND RevocationDate IS NOT NULL) -- Ensures that if a certification is reinstated, it must have been revoked.
+    ) -- Ensures that the status of the certification is consistent with the dates provided.
 );
 
 CREATE TABLE MechanicCertification (
@@ -258,7 +275,14 @@ CREATE TABLE MechanicCertification (
     CONSTRAINT FK_MC_Mechanic FOREIGN KEY (MechanicID) REFERENCES Mechanic(MechanicID),
     CONSTRAINT FK_MC_CertType FOREIGN KEY (MechanicCertificationTypeID) REFERENCES MechanicCertificationType(MechanicCertificationTypeID),
     CONSTRAINT CHK_MC_Dates CHECK (ExpiryDate > IssueDate),
-    CONSTRAINT CHK_MC_RevocationDate CHECK (RevocationDate IS NULL OR RevocationDate >= IssueDate)
+    CONSTRAINT CHK_MC_RevocationDate CHECK (RevocationDate IS NULL OR (RevocationDate >= IssueDate AND RevocationDate IS NOT NULL AND RevocationDate <= ExpiryDate)),
+    CONSTRAINT CHK_MC_StatusConsistency CHECK (
+        (Status = 'Active' AND RevocationDate IS NULL ) OR
+        (Status = 'Revoked' AND RevocationDate IS NOT NULL) OR
+        (Status = 'Expired') OR
+        (Status = 'Voided') OR
+        (Status = 'Reinstated' AND RevocationDate IS NOT NULL)
+    )
 );
 
 CREATE TABLE EventReview (
@@ -268,7 +292,7 @@ CREATE TABLE EventReview (
     Comments TEXT NULL,
     Recommendations TEXT NULL,
     Status ENUM('Unread', 'Read', 'Commented', 'Closed') DEFAULT 'Unread' NOT NULL,
-    DateReviewed DATETIME NOT NULL,
+    DateReviewed DATETIME NULL,
     CONSTRAINT FK_ER_Event FOREIGN KEY (EventID) REFERENCES SafetyEvent(EventID),
     CONSTRAINT FK_ER_Staff FOREIGN KEY (ReviewerStaffID) REFERENCES SafetyStaff(ReviewStaffID)
 );
@@ -288,7 +312,9 @@ CREATE TABLE PenaltyRule (
     PenaltyPoints DECIMAL(5,2) NOT NULL,
     CONSTRAINT FK_PR_EventType FOREIGN KEY (EventTypeID) REFERENCES EventType(EventTypeID),
     CONSTRAINT FK_PR_Severity FOREIGN KEY (SeverityID) REFERENCES EventSeverity(SeverityID),
-    CONSTRAINT CHK_PR_PenaltyPoints CHECK (PenaltyPoints >= 0)
+    CONSTRAINT CHK_PR_PenaltyPoints CHECK (PenaltyPoints >= 0),
+    CONSTRAINT CHK_PR_MinEventCount CHECK (MinEventCount > 0),
+    CONSTRAINT CHK_PR_TimeWindowMonths CHECK (TimeWindowMonths > 0)
 );
 
 CREATE TABLE DriverMonthlySafetyScore (
@@ -302,7 +328,7 @@ CREATE TABLE DriverMonthlySafetyScore (
     CONSTRAINT FK_DMSS_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
     CONSTRAINT FK_DMSS_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
     CONSTRAINT CHK_DMSS_Month CHECK (Month BETWEEN 1 AND 12),
-    CONSTRAINT CHK_DMSS_Score CHECK (Score <= 100)
+    CONSTRAINT CHK_DMSS_Score CHECK (Score <= 100) -- The score can be negative due to penalties, but it cannot exceed 100.
 );
 
 CREATE TABLE DriverScorePenalty (
@@ -361,6 +387,7 @@ CREATE TABLE PartSupplier (
     UnitCost BIGINT UNSIGNED NOT NULL,
     PRIMARY KEY (PartNumber, SupplierID),
     CONSTRAINT UC_PartSupplier UNIQUE (PartNumber, SupplierID),
+    CONSTRAINT UC_PS_OnePrimaryOneBackup UNIQUE (PartNumber, IsPrimary), -- Ensures that for each part, there can be only one primary supplier. If IsPrimary is true for a supplier, it cannot be true for any other supplier for the same part.
     CONSTRAINT FK_PS_Part FOREIGN KEY (PartNumber) REFERENCES Part(PartNumber),
     CONSTRAINT FK_PS_Supplier FOREIGN KEY (SupplierID) REFERENCES Supplier(SupplierID),
     CONSTRAINT CHK_PS_UnitCost CHECK (UnitCost > 0)
@@ -478,3 +505,13 @@ INSERT INTO VehicleCertificationRequirement (VehicleCategoryID, DriverCertificat
 
 -- 11. PenaltyRule
 INSERT INTO PenaltyRule (RuleType, RuleDescription, EventTypeID, SeverityID, MinEventCount, TimeWindowMonths, PenaltyPoints) VALUES
+('Base', 'Base penalty for Low severity events', NULL, 1, 1, 1, 2.0),
+('Base', 'Base penalty for Medium severity events', NULL, 2, 1, 1, 5.0),
+('Base', 'Base penalty for High severity events', NULL, 3, 1, 1, 10.0),
+('Base', 'Base penalty for Critical severity events', NULL, 4, 1, 1, 20.0),
+('Conditional', 'Conditional penalty for more than 3 speeding events within a month', 3, NULL, 3, 1, 10.0),
+('Conditional', 'Conditional penalty for more than 2 fatigue warnings within a month', 6, NULL, 2, 1, 15.0);
+
+-- Edge case penalties can be added as needed, for example:
+-- ('Base', 'Base penalty for Excessive speeding events', 3, NULL, 1, 1, 1.0),
+-- ('Conditional', 'Conditional penalty for more than 3 Medium severity events within 2 month', NULL, 2, 3, 2, 10.0)
