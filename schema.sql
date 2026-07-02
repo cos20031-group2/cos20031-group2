@@ -117,7 +117,8 @@ CREATE TABLE Vehicle (
     CONSTRAINT FK_Vehicle_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
     CONSTRAINT FK_Vehicle_Status FOREIGN KEY (OperationalStatus) REFERENCES VehicleStatus(VehicleStatusID),
     CONSTRAINT CHK_Vehicle_VIN_Length CHECK (CHAR_LENGTH(VIN) = 17),
-    CONSTRAINT CHK_Vehicle_Year CHECK (YearOfManufacture >= 1980)
+    CONSTRAINT CHK_Vehicle_Year CHECK (YearOfManufacture >= 1980),
+    CONSTRAINT CHK_Vehicle_RegPlate CHECK (RegistrationNumber REGEXP '^[0-9]{2}[A-Z]-[0-9]{3}\\.[0-9]{2}$')
 );
 
 CREATE TABLE Driver (
@@ -314,7 +315,9 @@ CREATE TABLE PenaltyRule (
     CONSTRAINT FK_PR_Severity FOREIGN KEY (SeverityID) REFERENCES EventSeverity(SeverityID),
     CONSTRAINT CHK_PR_PenaltyPoints CHECK (PenaltyPoints >= 0),
     CONSTRAINT CHK_PR_MinEventCount CHECK (MinEventCount > 0),
-    CONSTRAINT CHK_PR_TimeWindowMonths CHECK (TimeWindowMonths > 0)
+    CONSTRAINT CHK_PR_TimeWindowMonths CHECK (TimeWindowMonths > 0),
+    CONSTRAINT CHK_PR_Target_Consistency CHECK (EventTypeID IS NOT NULL OR SeverityID IS NOT NULL)
+)
 );
 
 CREATE TABLE DriverMonthlySafetyScore (
@@ -335,7 +338,7 @@ CREATE TABLE DriverScorePenalty (
     ScorePenaltyID INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     DriverMonthlySafetyScoreID INT UNSIGNED NOT NULL,
     PenaltyRuleID SMALLINT UNSIGNED NOT NULL,
-    EventID VARCHAR(100) NOT NULL,
+    EventID VARCHAR(100) NOT NULL, -- For linking to what event it was regardless whether PenaltyRuleID has EventTypeID or not. This allows for the tracking of penalties applied to specific events, even if the penalty rule is not directly tied to an event type.
     PointsDeducted DECIMAL(5,2) NOT NULL,
     DateApplied DATETIME NOT NULL,
     CONSTRAINT FK_DSP_Score FOREIGN KEY (DriverMonthlySafetyScoreID) REFERENCES DriverMonthlySafetyScore(DriverMonthlySafetyScoreID),
