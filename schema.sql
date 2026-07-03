@@ -65,7 +65,8 @@ CREATE TABLE Part (
     CurrentStock SMALLINT UNSIGNED NOT NULL,
     ReorderThreshold SMALLINT UNSIGNED NOT NULL,
     UnitPrice BIGINT UNSIGNED NOT NULL,
-    CONSTRAINT CHK_Part_UnitPrice CHECK (UnitPrice > 0)
+    CONSTRAINT CHK_Part_UnitPrice CHECK (UnitPrice > 0),
+    CONSTRAINT CHK_Part_ReorderThreshold CHECK (ReorderThreshold > 0)
 );
 
 -- ==========================================
@@ -116,7 +117,7 @@ CREATE TABLE Vehicle (
     CONSTRAINT FK_Vehicle_Category FOREIGN KEY (CategoryID) REFERENCES VehicleCategory(VehicleCategoryID),
     CONSTRAINT FK_Vehicle_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
     CONSTRAINT FK_Vehicle_Status FOREIGN KEY (OperationalStatus) REFERENCES VehicleStatus(VehicleStatusID),
-    CONSTRAINT CHK_Vehicle_VIN_Length CHECK (CHAR_LENGTH(VIN) = 17),
+    CONSTRAINT CHK_Vehicle_VIN_Length CHECK (CHAR_LENGTH(VIN) = 17 AND VIN NOT LIKE '%[^A-HJ-NPR-Z0-9]%'), -- Ensures VIN is exactly 17 characters and does not contain I, O, or Q.
     CONSTRAINT CHK_Vehicle_Year CHECK (YearOfManufacture >= 1980),
     CONSTRAINT CHK_Vehicle_RegPlate CHECK (RegistrationNumber REGEXP '^[0-9]{2}[A-Z]-[0-9]{3}\\.[0-9]{2}$')
 );
@@ -188,20 +189,32 @@ CREATE TABLE CoachingRecord ( -- No link to SafetyEvent, as coaching can be init
     CoachingRecordID INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     DriverID VARCHAR(20) NOT NULL,
     CoachingType ENUM('Safety Coaching', 'Retraining', 'Licence Review') NOT NULL,
-    Date DATE NOT NULL,
+    CoachingDate DATE NOT NULL,
+    CompletionDate DATE NULL,
     Outcome ENUM('Passed', 'Failed', 'In Progress', 'Pending') DEFAULT 'Pending' NOT NULL,
-    CONSTRAINT FK_CR_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID)
+    CONSTRAINT FK_CR_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
+    CONSTRAINT CHK_CR_Dates CHECK (CompletionDate IS NULL OR CompletionDate >= CoachingDate),
+    CONSTRAINT CHK_CR_OutcomeConsistency CHECK (
+        (Outcome IN ('In Progress', 'Pending') AND CompletionDate IS NULL) OR
+        (Outcome IN ('Passed', 'Failed') AND CompletionDate IS NOT NULL)
+    )
 );
 
 CREATE TABLE PredictiveAlert (
     AlertID INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     VIN VARCHAR(17) NOT NULL,
     AlertTypeID SMALLINT UNSIGNED NOT NULL,
-    DateGenerated DATETIME NOT NULL,
+    DateGenerated DATETIME NOT NULL, -- The date and time when the predictive alert was generated while the vehicle was in operation, based on the predictive maintenance system's analysis of the vehicle's telemetry data.
     ActionTaken TEXT NULL,
     AlertStatus ENUM('Unresolved', 'Acknowledged', 'Scheduled For Inspection', 'Urgent Repair Standby', 'Resolved') DEFAULT 'Unresolved' NOT NULL,
+    ResolutionDate DATETIME NULL,
     CONSTRAINT FK_PA_Vehicle FOREIGN KEY (VIN) REFERENCES Vehicle(VIN),
-    CONSTRAINT FK_PA_AlertType FOREIGN KEY (AlertTypeID) REFERENCES AlertType(AlertTypeID)
+    CONSTRAINT FK_PA_AlertType FOREIGN KEY (AlertTypeID) REFERENCES AlertType(AlertTypeID),
+    CONSTRAINT CHK_PA_ResolutionDate CHECK (ResolutionDate IS NULL OR ResolutionDate >= DateGenerated),
+    CONSTRAINT CHK_PA_AlertStatusConsistency CHECK (
+        (AlertStatus IN ('Unresolved', 'Acknowledged', 'Scheduled For Inspection', 'Urgent Repair Standby') AND ResolutionDate IS NULL) OR
+        (AlertStatus = 'Resolved' AND ResolutionDate IS NOT NULL)
+    )
 );
 
 CREATE TABLE MaintenanceJob (
@@ -228,7 +241,6 @@ CREATE TABLE MaintenanceActivity (
     RepeatedFaultFlag BOOLEAN NOT NULL,
     WarrantyFlag BOOLEAN NOT NULL,
     LinkedAlertID INT UNSIGNED NULL, -- LinkAlertID is here and not in MaintenanceJob to allow multiple different activities of the same job to be linked to different alerts. If a job is created to adress multiple alerts, each activity can be linked to the specific alert it addresses.
-    CONSTRAINT UC_MA_JobActivity UNIQUE (JobID, ActivityTypeID),
     CONSTRAINT FK_MA_Job FOREIGN KEY (JobID) REFERENCES MaintenanceJob(JobID),
     CONSTRAINT FK_MA_ActivityType FOREIGN KEY (ActivityTypeID) REFERENCES ActivityType(ActivityTypeID),
     CONSTRAINT FK_MA_Alert FOREIGN KEY (LinkedAlertID) REFERENCES PredictiveAlert(AlertID)
@@ -256,7 +268,7 @@ CREATE TABLE DriverCertification (
         (Status = 'Active' AND RevocationDate IS NULL) OR -- Ensures that if a certification is active, it has not been revoked.
         (Status = 'Revoked' AND RevocationDate IS NOT NULL) OR -- Ensures that if a certification is revoked, there must be a revocation date.
         (Status = 'Expired') OR
-        -- A certificate can be voided regardless of dates. If it is voided, it is considered invalid and ALL past transactions are invalidated. This is usefull for checking historical data in VehicleAssignment table, as it allows for the invalidation of all past transactions associated with a voided certificate.
+        -- A certificate can be voided regardless of dates. If it is voided, it is considered invalid and ALL past operations are illegal. This is usefull for checking historical data in VehicleAssignment table, as it allows for the invalidation of all past transactions associated with a voided certificate.
         -- The revocation date can be set to either NULL or a valid date in this case, as the voiding of the certificate is independent of the revocation process, meaning it can be revoked and then be voided, or it can be voided without being revoked.
         (Status = 'Voided') OR
         (Status = 'Reinstated' AND RevocationDate IS NOT NULL) -- Ensures that if a certification is reinstated, it must have been revoked.
@@ -295,7 +307,13 @@ CREATE TABLE EventReview (
     Status ENUM('Unread', 'Read', 'Commented', 'Closed') DEFAULT 'Unread' NOT NULL,
     DateReviewed DATETIME NULL,
     CONSTRAINT FK_ER_Event FOREIGN KEY (EventID) REFERENCES SafetyEvent(EventID),
-    CONSTRAINT FK_ER_Staff FOREIGN KEY (ReviewerStaffID) REFERENCES SafetyStaff(ReviewStaffID)
+    CONSTRAINT FK_ER_Staff FOREIGN KEY (ReviewerStaffID) REFERENCES SafetyStaff(ReviewStaffID),
+    CONSTRAINT CHK_ER_StatusConsistency CHECK (
+        (Status = 'Unread' AND DateReviewed IS NULL) OR
+        (Status = 'Read' AND DateReviewed IS NOT NULL) OR
+        (Status = 'Commented' AND DateReviewed IS NOT NULL AND Comments IS NOT NULL) OR
+        (Status = 'Closed' AND DateReviewed IS NOT NULL) -- Can't be edited after being closed, but can be closed without comments if the reviewer deems it unnecessary (dismissed, no action required, etc.). The review can be closed without comments, but it cannot be closed without being read first. Will be imlemented via a TRIGGER.
+    )
 );
 
 -- ==========================================
@@ -316,8 +334,7 @@ CREATE TABLE PenaltyRule (
     CONSTRAINT CHK_PR_PenaltyPoints CHECK (PenaltyPoints >= 0),
     CONSTRAINT CHK_PR_MinEventCount CHECK (MinEventCount > 0),
     CONSTRAINT CHK_PR_TimeWindowMonths CHECK (TimeWindowMonths > 0),
-    CONSTRAINT CHK_PR_Target_Consistency CHECK (EventTypeID IS NOT NULL OR SeverityID IS NOT NULL)
-)
+    CONSTRAINT CHK_PR_Target_Consistency CHECK (EventTypeID IS NOT NULL OR SeverityID IS NOT NULL) -- See edge cases in SEED DATA section at 11. PenaltyRule.
 );
 
 CREATE TABLE DriverMonthlySafetyScore (
@@ -344,7 +361,7 @@ CREATE TABLE DriverScorePenalty (
     CONSTRAINT FK_DSP_Score FOREIGN KEY (DriverMonthlySafetyScoreID) REFERENCES DriverMonthlySafetyScore(DriverMonthlySafetyScoreID),
     CONSTRAINT FK_DSP_Rule FOREIGN KEY (PenaltyRuleID) REFERENCES PenaltyRule(PenaltyRuleID),
     CONSTRAINT FK_DSP_Event FOREIGN KEY (EventID) REFERENCES SafetyEvent(EventID),
-    CONSTRAINT CHK_DSP_PointsDeducted CHECK (PointsDeducted >= 0)
+    CONSTRAINT CHK_DSP_PointsDeducted CHECK (PointsDeducted > 0)
 );
 
 CREATE TABLE ScheduledService (
@@ -353,9 +370,16 @@ CREATE TABLE ScheduledService (
     ScheduledDate DATE NOT NULL,
     Reason TEXT NULL,
     AlertID INT UNSIGNED NULL,
+    CompletionDate DATE NULL,
     Status ENUM('Scheduled', 'In Progress', 'Completed', 'Cancelled') DEFAULT 'Scheduled' NOT NULL,
     CONSTRAINT FK_SS_Vehicle FOREIGN KEY (VIN) REFERENCES Vehicle(VIN),
-    CONSTRAINT FK_SS_Alert FOREIGN KEY (AlertID) REFERENCES PredictiveAlert(AlertID)
+    CONSTRAINT FK_SS_Alert FOREIGN KEY (AlertID) REFERENCES PredictiveAlert(AlertID),
+    CONSTRAINT CHK_SS_CompletionDate CHECK (CompletionDate IS NULL OR CompletionDate >= ScheduledDate),
+    CONSTRAINT CHK_SS_StatusConsistency CHECK (
+        (Status IN ('Scheduled', 'In Progress') AND CompletionDate IS NULL) OR
+        (Status = 'Completed' AND CompletionDate IS NOT NULL) OR
+        (Status = 'Cancelled' AND CompletionDate IS NULL)
+    )
 );
 
 -- ==========================================
@@ -377,10 +401,17 @@ CREATE TABLE MechanicWorkSession (
 CREATE TABLE WarrantyClaim (
     ClaimID INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ActivityID INT UNSIGNED NOT NULL,
-    ClaimSource ENUM('Vehicle Manufacturer', 'Parts Supplier', 'Internal') NOT NULL,
+    ClaimSource ENUM('Vehicle Manufacturer', 'Parts Supplier', 'Internal Claim') NOT NULL,
     ClaimDate DATE NOT NULL,
     Status ENUM('Pending', 'Approved', 'Rejected', 'Settled') DEFAULT 'Pending' NOT NULL,
-    CONSTRAINT FK_WC_Activity FOREIGN KEY (ActivityID) REFERENCES MaintenanceActivity(ActivityID)
+    CONSTRAINT FK_WC_Activity FOREIGN KEY (ActivityID) REFERENCES MaintenanceActivity(ActivityID),
+    ResolutionDate DATE NULL,
+    CONSTRAINT CHK_WC_ResolutionDate CHECK (
+        ResolutionDate IS NULL OR ResolutionDate >= ClaimDate),
+    CONSTRAINT CHK_WC_StatusConsistency CHECK (
+        (Status = 'Pending' AND ResolutionDate IS NULL) OR
+        (Status IN ('Approved', 'Rejected', 'Settled') AND ResolutionDate IS NOT NULL)
+)
 );
 
 CREATE TABLE PartSupplier (
