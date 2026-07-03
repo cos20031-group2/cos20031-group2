@@ -117,7 +117,7 @@ CREATE TABLE Vehicle (
     CONSTRAINT FK_Vehicle_Category FOREIGN KEY (CategoryID) REFERENCES VehicleCategory(VehicleCategoryID),
     CONSTRAINT FK_Vehicle_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
     CONSTRAINT FK_Vehicle_Status FOREIGN KEY (OperationalStatus) REFERENCES VehicleStatus(VehicleStatusID),
-    CONSTRAINT CHK_Vehicle_VIN_Length CHECK (CHAR_LENGTH(VIN) = 17 AND VIN NOT LIKE '%[^A-HJ-NPR-Z0-9]%'), -- Ensures VIN is exactly 17 characters and does not contain I, O, or Q.
+    CONSTRAINT CHK_Vehicle_VIN_Length CHECK (VIN REGEXP '^[A-HJ-NPR-Z0-9]{17}$'), -- Ensures VIN is exactly 17 characters and does not contain I, O, or Q.
     CONSTRAINT CHK_Vehicle_Year CHECK (YearOfManufacture >= 1980),
     CONSTRAINT CHK_Vehicle_RegPlate CHECK (RegistrationNumber REGEXP '^[0-9]{2}[A-Z]-[0-9]{3}\\.[0-9]{2}$')
 );
