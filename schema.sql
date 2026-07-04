@@ -154,17 +154,22 @@ CREATE TABLE VehicleAssignment (
     VIN VARCHAR(17) NOT NULL,
     DriverID VARCHAR(20) NOT NULL,
     DepotID SMALLINT UNSIGNED NOT NULL,
-    IssueDate DATETIME NOT NULL,
-    EndDate DATETIME NULL,
-    IsActive BOOLEAN NOT NULL,
+    IssueDate DATETIME NOT NULL,      -- when the booking was made
+    StartDate DATETIME NULL,          -- when the vehicle actually left with this driver
+    EndDate DATETIME NULL,            -- when it stopped being in force (completed OR cancelled)
+    AssignmentStatus ENUM('Pending', 'In Operation', 'Completed', 'Cancelled') NOT NULL DEFAULT 'Pending',
     CONSTRAINT FK_VA_Vehicle FOREIGN KEY (VIN) REFERENCES Vehicle(VIN),
     CONSTRAINT FK_VA_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
     CONSTRAINT FK_VA_Depot FOREIGN KEY (DepotID) REFERENCES Depot(DepotID),
-    CONSTRAINT CHK_VA_Dates CHECK (EndDate IS NULL OR EndDate >= IssueDate),
-    CONSTRAINT CHK_VA_ActiveConsistency CHECK (
-            (IsActive = TRUE  AND EndDate IS NULL) OR
-            (IsActive = FALSE AND EndDate IS NOT NULL) -- Ensures that if the assignment is active, the EndDate must be NULL, and if it's inactive, the EndDate must be set.
-)
+    CONSTRAINT CHK_VA_StatusConsistency CHECK (
+        (AssignmentStatus = 'Pending'      AND StartDate IS NULL     AND EndDate IS NULL) OR
+        (AssignmentStatus = 'In Operation' AND StartDate IS NOT NULL AND EndDate IS NULL
+            AND StartDate >= IssueDate) OR
+        (AssignmentStatus = 'Completed'    AND StartDate IS NOT NULL AND EndDate IS NOT NULL
+            AND StartDate >= IssueDate AND EndDate >= StartDate) OR
+        (AssignmentStatus = 'Cancelled'    AND EndDate IS NOT NULL AND EndDate >= IssueDate
+            AND (StartDate IS NULL OR (StartDate >= IssueDate AND StartDate <= EndDate)))
+    )
 );
 
 CREATE TABLE SafetyEvent (
@@ -265,7 +270,7 @@ CREATE TABLE DriverCertification (
     CONSTRAINT FK_DC_Driver FOREIGN KEY (DriverID) REFERENCES Driver(DriverID),
     CONSTRAINT FK_DC_CertType FOREIGN KEY (DriverCertificationTypeID) REFERENCES DriverCertificationType(DriverCertificationTypeID),
     CONSTRAINT CHK_DC_Dates CHECK (ExpiryDate > IssueDate),
-    CONSTRAINT CHK_DC_RevocationDate CHECK (RevocationDate IS NULL OR (RevocationDate >= IssueDate AND RevocationDate IS NOT NULL AND RevocationDate <= ExpiryDate)), -- Ensures that if a certification is revoked, the revocation date cannot be before the issue date or after the expiry date.
+    CONSTRAINT CHK_DC_RevocationDate CHECK (RevocationDate IS NULL OR (RevocationDate >= IssueDate AND RevocationDate <= ExpiryDate)), -- Ensures that if a certification is revoked, the revocation date cannot be before the issue date or after the expiry date.
     CONSTRAINT CHK_DC_StatusConsistency CHECK (
         (Status = 'Active' AND RevocationDate IS NULL) OR -- Ensures that if a certification is active, it has not been revoked.
         (Status = 'Revoked' AND RevocationDate IS NOT NULL) OR -- Ensures that if a certification is revoked, there must be a revocation date.
