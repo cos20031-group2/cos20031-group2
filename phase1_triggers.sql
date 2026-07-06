@@ -57,6 +57,7 @@ FOR EACH ROW
 BEGIN
     DECLARE v_VehicleStatus VARCHAR(100);
     DECLARE v_DriverEligibility VARCHAR(100);
+    DECLARE v_EmploymentStatus VARCHAR(50);
     DECLARE v_CategoryID SMALLINT UNSIGNED;
     DECLARE v_MissingCerts INT DEFAULT 0;
 
@@ -73,10 +74,19 @@ BEGIN
             SET MESSAGE_TEXT = 'Cannot assign vehicle: vehicle is not currently Available.';
         END IF;
 
-        SELECT DrivingEligibility
-        INTO v_DriverEligibility
+        SELECT DrivingEligibility, EmploymentStatus
+        INTO v_DriverEligibility, v_EmploymentStatus
         FROM Driver
         WHERE DriverID = NEW.DriverID;
+
+        -- Two independent axes: EmploymentStatus (do they
+        -- work here right now) and DrivingEligibility (are they cleared to
+        -- drive). Both must pass -- a fully eligible driver who's On Leave or
+        -- Terminated is still not assignable.
+        IF v_EmploymentStatus <> 'Active' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Cannot assign driver: driver is not currently an active employee.';
+        END IF;
 
         IF v_DriverEligibility <> 'Eligible' THEN
             SIGNAL SQLSTATE '45000'
@@ -112,6 +122,7 @@ FOR EACH ROW
 BEGIN
     DECLARE v_VehicleStatus VARCHAR(100);
     DECLARE v_DriverEligibility VARCHAR(100);
+    DECLARE v_EmploymentStatus VARCHAR(50);
     DECLARE v_CategoryID SMALLINT UNSIGNED;
     DECLARE v_MissingCerts INT DEFAULT 0;
 
@@ -166,10 +177,15 @@ BEGIN
             SET MESSAGE_TEXT = 'Cannot start assignment: vehicle is not currently Available.';
         END IF;
 
-        SELECT DrivingEligibility
-        INTO v_DriverEligibility
+        SELECT DrivingEligibility, EmploymentStatus
+        INTO v_DriverEligibility, v_EmploymentStatus
         FROM Driver
         WHERE DriverID = NEW.DriverID;
+
+        IF v_EmploymentStatus <> 'Active' THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Cannot start assignment: driver is not currently an active employee.';
+        END IF;
 
         IF v_DriverEligibility <> 'Eligible' THEN
             SIGNAL SQLSTATE '45000'

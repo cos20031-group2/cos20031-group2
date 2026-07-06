@@ -127,10 +127,21 @@ CREATE TABLE Driver (
     FullName VARCHAR(255) NOT NULL,
     ContactInfo VARCHAR(255) NOT NULL,
     CurrentDepotID SMALLINT UNSIGNED NULL,
-    EmploymentStatus ENUM('Active', 'Inactive', 'Suspended', 'Terminated') NOT NULL,
+    
+    -- HR / Employment Status: Tracks their relationship with the company.
+    -- Replaced 'Suspended' with 'On Leave' to avoid overlap with driving suspensions.
+    EmploymentStatus ENUM('Active', 'On Leave', 'Terminated') NOT NULL, 
+    
     EmergencyContactDetails VARCHAR(255) NOT NULL,
-    DrivingEligibility ENUM('Eligible', 'Suspended - Pending Review', 'Suspended - Pending Training') DEFAULT 'Eligible' NOT NULL,
-    -- Licenses and certifications will be tracked in the DriverCertification table, allowing for multiple certifications per driver. Therefore there is no default license type or certification field here.
+    
+    -- Operational Status: Tracks their privilege to operate a vehicle.
+    -- 'Suspended' here specifically means they are employed but cannot drive.
+    DrivingEligibility ENUM('Eligible', 'Suspended') DEFAULT 'Eligible' NOT NULL,
+    
+    -- Licenses and certifications will be tracked in the DriverCertification table, 
+    -- allowing for multiple certifications per driver. Therefore there is no default 
+    -- license type or certification field here.
+    
     CONSTRAINT FK_Driver_Depot FOREIGN KEY (CurrentDepotID) REFERENCES Depot(DepotID),
     CONSTRAINT CHK_Driver_DriverID_Prefix CHECK (DriverID LIKE 'D-%')
 );
