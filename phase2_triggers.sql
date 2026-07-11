@@ -292,4 +292,17 @@ BEGIN
 END;
 //
 
+-- AFTER INSERT: covers a Retraining record created directly (staff manually
+-- enrolling a driver) rather than via the DriverScorePenalty cascade above,
+-- which already calls the procedure itself as part of its own insert.
+CREATE TRIGGER TRG_CoachingRecord_AfterInsert
+AFTER INSERT ON CoachingRecord
+FOR EACH ROW
+BEGIN
+    IF NEW.CoachingType = 'Retraining' AND NEW.Outcome <> 'Passed' THEN
+        CALL sp_RecomputeDriverEligibility(NEW.DriverID);
+    END IF;
+END;
+//
+
 DELIMITER ;
