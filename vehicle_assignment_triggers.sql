@@ -1,11 +1,29 @@
+-- ==========================================================
+-- VEHICLE ASSIGNMENT TRIGGERS  (1 of 5)
+-- ==========================================================
+-- Scope: fn_NextVehicleStatus (the shared vehicle-status derivation
+-- function) and the full VehicleAssignment lifecycle -- booking
+-- (Pending) -> In Operation -> Completed/Cancelled -- including the
+-- eligibility/certification gate and the vehicle status flips that
+-- go with each transition.
+--
+-- Depends on: schema.sql
+-- Note: fn_NextVehicleStatus, defined below, is also called from the
+-- MaintenanceJob triggers in maintenance_and_alert_triggers.sql.
+-- ==========================================================
+
 -- ==========================================
 -- SUPPORTING FUNCTION
 -- ==========================================
 -- Decides what a vehicle should become when it's released back to the fleet,
 -- whether that's from a VehicleAssignment ending or a MaintenanceJob closing.
--- Extracted because both AFTER UPDATE triggers below needed the exact same
--- "any pending scheduled work due?" logic, and duplicating it was already a
--- maintenance risk with just two call sites.
+-- Checks three independent sources of truth, in priority order: is another
+-- MaintenanceJob still open on this VIN, is there still an In Operation
+-- VehicleAssignment on it, and finally, is a ScheduledService due. Extracted
+-- because every call site needs the same full picture, and duplicating this
+-- logic across triggers was already a maintenance risk with just two call
+-- sites -- now with three checks instead of one, keeping it in one place
+-- matters even more.
 
 DELIMITER //
 
@@ -14,9 +32,38 @@ RETURNS SMALLINT UNSIGNED
 NOT DETERMINISTIC
 READS SQL DATA
 BEGIN
+    DECLARE v_OpenJobs INT DEFAULT 0;
+    DECLARE v_OpenAssignment INT DEFAULT 0;
     DECLARE v_PendingServices INT DEFAULT 0;
     DECLARE v_StatusID SMALLINT UNSIGNED;
 
+    -- Tier 1: still physically being worked on (another job open on this VIN)?
+    -- Beats everything else -- a vehicle mid-repair can't be handed to a driver.
+    SELECT COUNT(*) INTO v_OpenJobs
+    FROM MaintenanceJob
+    WHERE VIN = p_VIN AND DateClosed IS NULL;
+
+    IF v_OpenJobs > 0 THEN
+        SELECT VehicleStatusID INTO v_StatusID
+        FROM VehicleStatus WHERE VehicleStatus = 'Under Maintenance';
+        RETURN v_StatusID;
+    END IF;
+
+    -- Tier 2: still administratively out with a driver? (The "emergency
+    -- repair on an In Operation vehicle" case -- we don't auto-cancel that
+    -- assignment, so when the job closes it should go back to Active, not
+    -- Available, since someone still has it.)
+    SELECT COUNT(*) INTO v_OpenAssignment
+    FROM VehicleAssignment
+    WHERE VIN = p_VIN AND AssignmentStatus = 'In Operation';
+
+    IF v_OpenAssignment > 0 THEN
+        SELECT VehicleStatusID INTO v_StatusID
+        FROM VehicleStatus WHERE VehicleStatus = 'Active';
+        RETURN v_StatusID;
+    END IF;
+
+    -- Tier 3: free and clear -- just check whether something's due.
     SELECT COUNT(*) INTO v_PendingServices
     FROM ScheduledService
     WHERE VIN = p_VIN
@@ -40,7 +87,7 @@ DELIMITER ;
 
 
 -- ==========================================
--- TRIGGERS: Phase 1 - Vehicle Assignment Validations & Status Automation
+-- TRIGGERS: Vehicle Assignment Validations & Status Automation
 -- ==========================================
 
 DELIMITER //
@@ -69,7 +116,7 @@ BEGIN
         JOIN VehicleStatus vs ON v.OperationalStatus = vs.VehicleStatusID
         WHERE v.VIN = NEW.VIN;
 
-        IF v_VehicleStatus <> 'Available' THEN
+        IF v_VehicleStatus IS NULL OR v_VehicleStatus <> 'Available' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Cannot assign vehicle: vehicle is not currently Available.';
         END IF;
@@ -83,7 +130,7 @@ BEGIN
         -- work here right now) and DrivingEligibility (are they cleared to
         -- drive). Both must pass -- a fully eligible driver who's On Leave or
         -- Terminated is still not assignable.
-        IF v_EmploymentStatus <> 'Active' THEN
+        IF v_EmploymentStatus IS NULL OR v_EmploymentStatus <> 'Active' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Cannot assign driver: driver is not currently an active employee.';
         END IF;
@@ -172,7 +219,7 @@ BEGIN
         JOIN VehicleStatus vs ON v.OperationalStatus = vs.VehicleStatusID
         WHERE v.VIN = NEW.VIN;
 
-        IF v_VehicleStatus <> 'Available' THEN
+        IF v_VehicleStatus IS NULL OR v_VehicleStatus <> 'Available' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Cannot start assignment: vehicle is not currently Available.';
         END IF;
@@ -182,7 +229,7 @@ BEGIN
         FROM Driver
         WHERE DriverID = NEW.DriverID;
 
-        IF v_EmploymentStatus <> 'Active' THEN
+        IF v_EmploymentStatus IS NULL OR v_EmploymentStatus <> 'Active' THEN
             SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Cannot start assignment: driver is not currently an active employee.';
         END IF;
@@ -271,46 +318,3 @@ END;
 DELIMITER ;
 
 
--- ==========================================
--- TRIGGERS: Phase 1B - Maintenance Job Lifecycle Automation
--- ==========================================
--- Refactored to call fn_NextVehicleStatus instead of duplicating the
--- "check ScheduledService" logic that used to live in both this trigger
--- and TRG_VehicleAssignment_AfterUpdate.
-
-DELIMITER //
-
--- 1. AFTER INSERT: Force vehicle into 'Under Maintenance' the second a job opens,
---    regardless of what it was doing before (Available, Awaiting Inspection, or
---    still administratively 'In Operation' under an unrelated active assignment --
---    per our discussion, we're deliberately NOT auto-cancelling that assignment).
-CREATE TRIGGER TRG_MaintenanceJob_AfterInsert
-AFTER INSERT ON MaintenanceJob
-FOR EACH ROW
-BEGIN
-    DECLARE v_UnderMaintenanceStatusID SMALLINT UNSIGNED;
-
-    SELECT VehicleStatusID INTO v_UnderMaintenanceStatusID
-    FROM VehicleStatus WHERE VehicleStatus = 'Under Maintenance';
-
-    UPDATE Vehicle
-    SET OperationalStatus = v_UnderMaintenanceStatusID
-    WHERE VIN = NEW.VIN;
-END;
-//
-
-
--- 2. AFTER UPDATE: Release vehicle when the job closes.
-CREATE TRIGGER TRG_MaintenanceJob_AfterUpdate
-AFTER UPDATE ON MaintenanceJob
-FOR EACH ROW
-BEGIN
-    IF OLD.DateClosed IS NULL AND NEW.DateClosed IS NOT NULL THEN
-        UPDATE Vehicle
-        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN)
-        WHERE VIN = NEW.VIN;
-    END IF;
-END;
-//
-
-DELIMITER ;

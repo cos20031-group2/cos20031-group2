@@ -1,99 +1,15 @@
--- ==========================================
--- SHARED PROCEDURE: Driver Eligibility Recompute
--- ==========================================
--- DrivingEligibility is a CACHE, not a record. Nothing ever writes 'Eligible'
--- or 'Suspended' from local knowledge -- every touchpoint (critical event,
--- review closing, coaching outcome) calls this, and it re-derives the answer
--- from scratch by checking every disqualifying condition. This is what lets
--- two independent reasons (an open review AND an open retraining) coexist
--- without one trigger clobbering the other's write.
-
-DELIMITER //
-
-CREATE PROCEDURE sp_RecomputeDriverEligibility(IN p_DriverID VARCHAR(20))
-BEGIN
-    DECLARE v_Blocked BOOLEAN DEFAULT FALSE;
-
-    -- Reason 1: an unresolved Critical-severity event. SafetyEvent.ReviewState
-    -- is itself kept in sync with EventReview by the triggers below, so this
-    -- only reads a column, it doesn't re-derive review state itself.
-    IF EXISTS (
-        SELECT 1
-        FROM SafetyEvent se
-        JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
-        WHERE se.DriverID = p_DriverID
-          AND sev.SeverityLevel = 'Critical'
-          AND se.ReviewState <> 'Completed'
-    ) THEN
-        SET v_Blocked = TRUE;
-    END IF;
-
-    -- Reason 2: an outstanding Retraining requirement (score <= 50 cascade).
-    -- Anything other than 'Passed' keeps the driver blocked, including 'Failed'
-    -- -- a failed retraining doesn't clear the requirement, it just sits there
-    -- until staff enrol them in a new one or update the outcome.
-    IF EXISTS (
-        SELECT 1
-        FROM CoachingRecord
-        WHERE DriverID = p_DriverID
-          AND CoachingType = 'Retraining'
-          AND Outcome <> 'Passed'
-    ) THEN
-        SET v_Blocked = TRUE;
-    END IF;
-
-    UPDATE Driver
-    SET DrivingEligibility = IF(v_Blocked, 'Suspended', 'Eligible')
-    WHERE DriverID = p_DriverID;
-END;
-//
-
-DELIMITER ;
-
-
--- ==========================================
--- TRIGGERS: SafetyEvent - Severity Routing
--- ==========================================
-
-DELIMITER //
-
--- BEFORE INSERT: High/Critical always forces 'Pending', overriding whatever
--- the app sent. Low/Medium is left completely alone -- if the app didn't
--- specify a value, the column's own DEFAULT 'No Review Required' already
--- applies before this trigger runs, so there's nothing extra to do here.
-CREATE TRIGGER TRG_SafetyEvent_BeforeInsert
-BEFORE INSERT ON SafetyEvent
-FOR EACH ROW
-BEGIN
-    DECLARE v_SeverityLevel VARCHAR(100);
-
-    SELECT SeverityLevel INTO v_SeverityLevel
-    FROM EventSeverity WHERE SeverityID = NEW.SeverityID;
-
-    IF v_SeverityLevel IN ('High', 'Critical') THEN
-        SET NEW.ReviewState = 'Pending';
-    END IF;
-END;
-//
-
--- AFTER INSERT: Critical events are the only ones that touch eligibility.
-CREATE TRIGGER TRG_SafetyEvent_AfterInsert
-AFTER INSERT ON SafetyEvent
-FOR EACH ROW
-BEGIN
-    DECLARE v_SeverityLevel VARCHAR(100);
-
-    SELECT SeverityLevel INTO v_SeverityLevel
-    FROM EventSeverity WHERE SeverityID = NEW.SeverityID;
-
-    IF v_SeverityLevel = 'Critical' THEN
-        CALL sp_RecomputeDriverEligibility(NEW.DriverID);
-    END IF;
-END;
-//
-
-DELIMITER ;
-
+-- ==========================================================
+-- EVENT REVIEW, COACHING & SCORING TRIGGERS  (4 of 5)
+-- ==========================================================
+-- Scope: the "downstream consequences" side of the safety system --
+-- fn_EventReviewState and the EventReview close-guard/back-write
+-- triggers, the DriverScorePenalty score cascade (including
+-- automatic CoachingRecord creation), CoachingRecord completion
+-- clearing eligibility, and the sp_InitializeMonthlyScores procedure.
+--
+-- Depends on: schema.sql, driver_eligibility_and_safety_event_triggers.sql
+-- (calls sp_RecomputeDriverEligibility, defined there).
+-- ==========================================================
 
 -- ==========================================
 -- SUPPORTING FUNCTION: EventReview Aggregation
@@ -151,14 +67,36 @@ DELIMITER ;
 
 DELIMITER //
 
--- BEFORE UPDATE: Can't close a review that was never read.
+-- BEFORE UPDATE: Can't close a review that was never read, and once Closed,
+-- a review is a historical fact -- matches the "Can't be edited after being
+-- closed" line in the CHK_ER_StatusConsistency comment in schema.sql, which
+-- wasn't actually enforced anywhere until now.
 CREATE TRIGGER TRG_EventReview_BeforeUpdate
 BEFORE UPDATE ON EventReview
 FOR EACH ROW
 BEGIN
+    IF OLD.Status = 'Closed' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot modify a review that has already been closed.';
+    END IF;
+
     IF NEW.Status = 'Closed' AND OLD.Status = 'Unread' THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Cannot close a review that has not been read.';
+    END IF;
+END;
+//
+
+-- BEFORE INSERT: A review can't be born already Closed -- same "must be
+-- Read first" rule as the BeforeUpdate guard, just covering the entry point
+-- that guard can't see (INSERT has no OLD.Status to compare against).
+CREATE TRIGGER TRG_EventReview_BeforeInsert
+BEFORE INSERT ON EventReview
+FOR EACH ROW
+BEGIN
+    IF NEW.Status = 'Closed' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot insert a review as Closed; it must be read first.';
     END IF;
 END;
 //
@@ -169,10 +107,23 @@ AFTER INSERT ON EventReview
 FOR EACH ROW
 BEGIN
     DECLARE v_NewState VARCHAR(50);
+    DECLARE v_DriverID VARCHAR(20);
+
     SET v_NewState = fn_EventReviewState(NEW.EventID);
 
     IF v_NewState IS NOT NULL THEN
+        SET @sfms_allow_reviewstate_write = 1;
         UPDATE SafetyEvent SET ReviewState = v_NewState WHERE EventID = NEW.EventID;
+        SET @sfms_allow_reviewstate_write = NULL;
+    END IF;
+
+    -- With the BeforeInsert guard above, a freshly inserted row can never
+    -- itself be Closed, so this branch should be structurally unreachable
+    -- today. Kept anyway, mirroring AfterUpdate exactly, as cheap insurance
+    -- in case that guard is ever loosened later.
+    IF v_NewState = 'Completed' THEN
+        SELECT DriverID INTO v_DriverID FROM SafetyEvent WHERE EventID = NEW.EventID;
+        CALL sp_RecomputeDriverEligibility(v_DriverID);
     END IF;
 END;
 //
@@ -192,7 +143,9 @@ BEGIN
         SET v_NewState = fn_EventReviewState(NEW.EventID);
 
         IF v_NewState IS NOT NULL THEN
+            SET @sfms_allow_reviewstate_write = 1;
             UPDATE SafetyEvent SET ReviewState = v_NewState WHERE EventID = NEW.EventID;
+            SET @sfms_allow_reviewstate_write = NULL;
         END IF;
 
         IF v_NewState = 'Completed' THEN
@@ -280,6 +233,23 @@ DELIMITER ;
 
 DELIMITER //
 
+-- BEFORE UPDATE: DriverID, CoachingType, and CoachingDate are the "who/what/
+-- when this was opened" facts -- locked once set, same pattern as
+-- VehicleAssignment and MechanicWorkSession. Outcome and CompletionDate stay
+-- open, since progressing a coaching record to Passed/Failed is the point.
+CREATE TRIGGER TRG_CoachingRecord_BeforeUpdate
+BEFORE UPDATE ON CoachingRecord
+FOR EACH ROW
+BEGIN
+    IF NEW.DriverID <> OLD.DriverID
+       OR NEW.CoachingType <> OLD.CoachingType
+       OR NEW.CoachingDate <> OLD.CoachingDate THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot modify DriverID, CoachingType, or CoachingDate on an existing coaching record.';
+    END IF;
+END;
+//
+
 CREATE TRIGGER TRG_CoachingRecord_AfterUpdate
 AFTER UPDATE ON CoachingRecord
 FOR EACH ROW
@@ -306,3 +276,47 @@ END;
 //
 
 DELIMITER ;
+
+
+-- ==========================================
+-- SUPPORTING PROCEDURE: Monthly Score Initialization
+-- ==========================================
+-- Creates a DriverMonthlySafetyScore row at Score = 100 for every eligible
+-- driver for a given month/year. Not a trigger -- there's no DML event that
+-- means "a new month started," so this needs an explicit call, either from
+-- a MySQL scheduled EVENT (not built here) or an app-side monthly job.
+--
+-- Idempotent by design (NOT EXISTS guard + the table's own
+-- UC_DriverMonthlySafetyScore unique constraint as a backstop), so it's safe
+-- to call more than once for the same month -- which matters, because
+-- 'On Leave' drivers are deliberately included below. A driver who returns
+-- from leave mid-month, or who's assigned a depot mid-month, needs this
+-- re-run to pick them up; otherwise the first DriverScorePenalty against
+-- them that month has no row to decrement.
+--
+-- Only 'Terminated' is excluded. Drivers with no CurrentDepotID are skipped
+-- entirely (DepotID is NOT NULL on this table) -- worth revisiting if that
+-- turns out to be a real scenario rather than an edge case.
+
+DELIMITER //
+
+CREATE PROCEDURE sp_InitializeMonthlyScores(IN p_Month TINYINT UNSIGNED, IN p_Year YEAR)
+BEGIN
+    INSERT INTO DriverMonthlySafetyScore (DriverID, Month, Year, DepotID, Score)
+    SELECT d.DriverID, p_Month, p_Year, d.CurrentDepotID, 100.00
+    FROM Driver d
+    WHERE d.EmploymentStatus <> 'Terminated'
+      AND d.CurrentDepotID IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM DriverMonthlySafetyScore dmss
+          WHERE dmss.DriverID = d.DriverID
+            AND dmss.Month = p_Month
+            AND dmss.Year = p_Year
+      );
+END;
+//
+
+DELIMITER ;
+
+-- Example call, for this month:
+--   CALL sp_InitializeMonthlyScores(MONTH(CURDATE()), YEAR(CURDATE()));

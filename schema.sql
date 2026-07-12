@@ -243,7 +243,6 @@ CREATE TABLE MaintenanceJob (
     Downtime DECIMAL(12,4) NOT NULL,
     TotalCost BIGINT UNSIGNED NULL,
     CONSTRAINT FK_MJ_Vehicle FOREIGN KEY (VIN) REFERENCES Vehicle(VIN),
-    CONSTRAINT FK_MJ_Schedule FOREIGN KEY (ScheduleID) REFERENCES ScheduledService(ScheduleID),
     CONSTRAINT FK_MJ_Workshop FOREIGN KEY (WorkshopID) REFERENCES Workshop(WorkshopID),
     CONSTRAINT CHK_MJ_JobID_Prefix CHECK (JobID LIKE 'M%'),
     CONSTRAINT CHK_MJ_Dates CHECK (DateClosed IS NULL OR DateClosed >= DateOpened),
@@ -399,6 +398,9 @@ CREATE TABLE ScheduledService (
         (Status = 'Cancelled' AND CompletionDate IS NULL)
     )
 );
+
+ALTER TABLE MaintenanceJob
+ADD CONSTRAINT FK_MJ_Schedule FOREIGN KEY (ScheduleID) REFERENCES ScheduledService(ScheduleID);
 
 -- ==========================================
 -- 6. Workshop Operations & Parts Tracking
