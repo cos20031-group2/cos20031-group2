@@ -73,18 +73,48 @@ END;
 --    regardless of what it was doing before (Available, Awaiting Inspection, or
 --    still administratively 'In Operation' under an unrelated active assignment --
 --    per our discussion, we're deliberately NOT auto-cancelling that assignment).
+--
+--    FIX (found during seed-data generator design): the original version of
+--    this trigger set 'Under Maintenance' unconditionally, with no check on
+--    NEW.DateClosed. A job inserted already-closed (e.g. a historical
+--    backfill row) would still shove the vehicle into 'Under Maintenance' --
+--    but since TRG_MaintenanceJob_AfterUpdate's release logic only fires on
+--    an actual OLD.DateClosed IS NULL -> NEW.DateClosed IS NOT NULL
+--    transition, a pre-closed insert leaves nothing to ever release it, and
+--    a linked ScheduledService (if any) never gets its back-write either.
+--    Branching on NEW.DateClosed here mirrors the AfterUpdate logic for the
+--    already-closed case, so both entry points (insert-open-then-update, and
+--    insert-pre-closed-in-one-shot) leave the vehicle and any linked
+--    ScheduledService correctly triaged.
 CREATE TRIGGER TRG_MaintenanceJob_AfterInsert
 AFTER INSERT ON MaintenanceJob
 FOR EACH ROW
 BEGIN
     DECLARE v_UnderMaintenanceStatusID SMALLINT UNSIGNED;
 
-    SELECT VehicleStatusID INTO v_UnderMaintenanceStatusID
-    FROM VehicleStatus WHERE VehicleStatus = 'Under Maintenance';
+    IF NEW.DateClosed IS NULL THEN
+        -- Job is genuinely open: vehicle goes into the shop now.
+        SELECT VehicleStatusID INTO v_UnderMaintenanceStatusID
+        FROM VehicleStatus WHERE VehicleStatus = 'Under Maintenance';
 
-    UPDATE Vehicle
-    SET OperationalStatus = v_UnderMaintenanceStatusID
-    WHERE VIN = NEW.VIN;
+        UPDATE Vehicle
+        SET OperationalStatus = v_UnderMaintenanceStatusID
+        WHERE VIN = NEW.VIN;
+    ELSE
+        -- Job arrived already closed (e.g. historical backfill): it never
+        -- actually held the vehicle at insert time, so re-triage instead of
+        -- forcing Under Maintenance. Mirrors the AfterUpdate release path.
+        IF NEW.ScheduleID IS NOT NULL THEN
+            UPDATE ScheduledService
+            SET Status = 'Completed',
+                CompletionDate = DATE(NEW.DateClosed)
+            WHERE ScheduleID = NEW.ScheduleID;
+        END IF;
+
+        UPDATE Vehicle
+        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN)
+        WHERE VIN = NEW.VIN;
+    END IF;
 END;
 //
 
