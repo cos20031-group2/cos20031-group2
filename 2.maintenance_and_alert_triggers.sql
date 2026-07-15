@@ -45,7 +45,7 @@ END;
 --     record-of-a-thing-that-happened table in this project. VIN, WorkshopID,
 --     DateOpened, and ScheduleID are locked. DateClosed and TotalCost stay
 --     open (closing/costing the job is the whole point) -- EXCEPT DateClosed
---     can never move back from NOT NULL to NULL. Un-closing a job would
+--     can never move back from NOT NULL to NULL. NOTE: Un-closing a job would
 --     silently break the one-open-job-per-VIN gate above, since that gate
 --     only runs on INSERT: Job A closes, Job B opens (allowed, A is closed),
 --     then un-closing A would leave two jobs open on the same VIN with
@@ -76,12 +76,15 @@ END;
 --
 --    FIX (found during seed-data generator design): the original version of
 --    this trigger set 'Under Maintenance' unconditionally, with no check on
---    NEW.DateClosed. A job inserted already-closed (e.g. a historical
---    backfill row) would still shove the vehicle into 'Under Maintenance' --
+--    NEW.DateClosed.
+--
+--    A job inserted already-closed (e.g. a historical backfill row)
+--    would still shove the vehicle into 'Under Maintenance' --
 --    but since TRG_MaintenanceJob_AfterUpdate's release logic only fires on
 --    an actual OLD.DateClosed IS NULL -> NEW.DateClosed IS NOT NULL
 --    transition, a pre-closed insert leaves nothing to ever release it, and
 --    a linked ScheduledService (if any) never gets its back-write either.
+--    
 --    Branching on NEW.DateClosed here mirrors the AfterUpdate logic for the
 --    already-closed case, so both entry points (insert-open-then-update, and
 --    insert-pre-closed-in-one-shot) leave the vehicle and any linked
@@ -112,7 +115,7 @@ BEGIN
         END IF;
 
         UPDATE Vehicle
-        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN)
+        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN) -- See fn_NextVehicleStatus at line 30 in 1.vehicle_assignment_functions.sql for the full triage logic.
         WHERE VIN = NEW.VIN;
     END IF;
 END;
@@ -138,7 +141,7 @@ BEGIN
         END IF;
 
         UPDATE Vehicle
-        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN)
+        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN) -- See fn_NextVehicleStatus at line 30 in 1.vehicle_assignment_functions.sql for the full triage logic.
         WHERE VIN = NEW.VIN;
     END IF;
 END;
@@ -182,23 +185,26 @@ BEGIN
 END;
 //
 
+-- Trigger to automatically schedule maintenance/inspection when an escalated predictive alert is created
 CREATE TRIGGER TRG_PredictiveAlert_AfterInsert
 AFTER INSERT ON PredictiveAlert
 FOR EACH ROW
 BEGIN
     IF NEW.AlertStatus IN ('Scheduled For Inspection', 'Urgent Repair Standby') THEN
-        CALL sp_AutoScheduleFromAlert(NEW.AlertID, NEW.VIN);
+        CALL sp_AutoScheduleFromAlert(NEW.AlertID, NEW.VIN); -- See sp_AutoScheduleFromAlert at line 165 in 2.maintenance_and_alert_triggers.sql for the full guard logic.
     END IF;
 END;
 //
 
+
+-- Trigger to automatically schedule maintenance/inspection when a predictive alert is escalated/updated to an escalated status
 CREATE TRIGGER TRG_PredictiveAlert_AfterUpdate
 AFTER UPDATE ON PredictiveAlert
 FOR EACH ROW
 BEGIN
     IF NEW.AlertStatus IN ('Scheduled For Inspection', 'Urgent Repair Standby')
        AND OLD.AlertStatus <> NEW.AlertStatus THEN
-        CALL sp_AutoScheduleFromAlert(NEW.AlertID, NEW.VIN);
+        CALL sp_AutoScheduleFromAlert(NEW.AlertID, NEW.VIN); -- See sp_AutoScheduleFromAlert at line 165 in 2.maintenance_and_alert_triggers.sql for the full guard logic.
     END IF;
 END;
 //

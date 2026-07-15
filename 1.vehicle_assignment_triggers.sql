@@ -29,9 +29,10 @@ DELIMITER //
 
 CREATE FUNCTION fn_NextVehicleStatus(p_VIN VARCHAR(17))
 RETURNS SMALLINT UNSIGNED
-NOT DETERMINISTIC
+NOT DETERMINISTIC -- The result can change over time as the vehicle's state changes (new jobs, assignments, or services).
 READS SQL DATA
 BEGIN
+    -- Declare variables to hold counts and status ID
     DECLARE v_OpenJobs INT DEFAULT 0;
     DECLARE v_OpenAssignment INT DEFAULT 0;
     DECLARE v_PendingServices INT DEFAULT 0;
@@ -41,7 +42,7 @@ BEGIN
     -- Beats everything else -- a vehicle mid-repair can't be handed to a driver.
     SELECT COUNT(*) INTO v_OpenJobs
     FROM MaintenanceJob
-    WHERE VIN = p_VIN AND DateClosed IS NULL;
+    WHERE VIN = p_VIN AND DateClosed IS NULL; -- Check for open maintenance jobs
 
     IF v_OpenJobs > 0 THEN
         SELECT VehicleStatusID INTO v_StatusID
@@ -95,6 +96,7 @@ DELIMITER //
 -- 1. BEFORE INSERT: Gate only applies when a row is born already 'In Operation'
 --    (walk-up assignment, no advance Pending booking). 'Pending' inserts skip
 --    validation entirely -- that's the whole point of Pending existing.
+--
 --    Historical backfills landing directly as Completed/Cancelled also skip
 --    the gate, since checking today's vehicle/driver state against a past
 --    record would reject perfectly legitimate historical data.
@@ -304,7 +306,7 @@ BEGIN
     -- mid-route. Either way it needs to be re-triaged for the next state.
     IF OLD.AssignmentStatus = 'In Operation' AND NEW.AssignmentStatus IN ('Completed', 'Cancelled') THEN
         UPDATE Vehicle
-        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN)
+        SET OperationalStatus = fn_NextVehicleStatus(NEW.VIN) -- See fn_NextVehicleStatus at line 30 in 1.vehicle_assignment_functions.sql for the full triage logic.
         WHERE VIN = NEW.VIN;
     END IF;
 

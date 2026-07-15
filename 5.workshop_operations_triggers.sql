@@ -184,8 +184,7 @@ DELIMITER ;
 -- ==========================================
 -- TRIGGER: WarrantyClaim - Historical Fact Lock
 -- ==========================================
--- The other gap in the project-wide "lock once written" pattern (alongside
--- MaintenanceJob, fixed in phase1_triggers.sql this same pass). ActivityID,
+-- The other gap in the project-wide "lock once written" pattern. ActivityID,
 -- ClaimSource, and ClaimDate are the "what/why/when this was filed" facts --
 -- locked once set. Status and ResolutionDate stay open, since progressing a
 -- claim through Pending -> Approved/Rejected/Settled is the point.

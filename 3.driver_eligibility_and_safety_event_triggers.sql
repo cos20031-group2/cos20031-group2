@@ -55,8 +55,8 @@ BEGIN
     END IF;
 
     -- Reason 2: an outstanding Retraining requirement (score <= 50 cascade).
-    -- Anything other than 'Passed' keeps the driver blocked, including 'Failed'
-    -- -- a failed retraining doesn't clear the requirement, it just sits there
+    -- Anything other than 'Passed' keeps the driver blocked, including 'Failed'.
+    -- A failed retraining doesn't clear the requirement, it just sits there
     -- until staff enrol them in a new one or update the outcome.
     IF EXISTS (
         SELECT 1
@@ -71,13 +71,14 @@ BEGIN
     -- This is the ONLY authorized writer of DrivingEligibility -- the flag
     -- tells TRG_Driver_BeforeUpdate to let this specific write through, and
     -- gets cleared immediately after so nothing else can piggyback on it.
-    SET @sfms_allow_eligibility_write = 1;
+    SET @sfms_allow_eligibility_write = 1; -- Allow direct write to DrivingEligibility
     UPDATE Driver
     SET DrivingEligibility = IF(v_Blocked, 'Suspended', 'Eligible')
     WHERE DriverID = p_DriverID;
-    SET @sfms_allow_eligibility_write = NULL;
+    SET @sfms_allow_eligibility_write = NULL; -- Clear the flag so no other writes can sneak through
 END;
 //
+
 
 -- BEFORE UPDATE: DrivingEligibility is derived-only. Any attempt to write it
 -- outside of sp_RecomputeDriverEligibility (i.e. without the flag set) is
@@ -91,7 +92,7 @@ BEGIN
     IF NEW.DrivingEligibility <> OLD.DrivingEligibility
        AND (@sfms_allow_eligibility_write IS NULL OR @sfms_allow_eligibility_write <> 1) THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'DrivingEligibility cannot be written directly; it is derived by sp_RecomputeDriverEligibility.';
+        SET MESSAGE_TEXT = 'DrivingEligibility cannot be written directly; it is derived by sp_RecomputeDriverEligibility. Please check for open critical events or outstanding retraining requirements.';
     END IF;
 END;
 //
@@ -135,7 +136,7 @@ BEGIN
     FROM EventSeverity WHERE SeverityID = NEW.SeverityID;
 
     IF v_SeverityLevel = 'Critical' THEN
-        CALL sp_RecomputeDriverEligibility(NEW.DriverID);
+        CALL sp_RecomputeDriverEligibility(NEW.DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full recompute logic.
     END IF;
 END;
 //
@@ -149,8 +150,17 @@ DELIMITER ;
 -- Nothing previously read PenaltyRule at all -- monthly scores never moved
 -- unless something manually inserted DriverScorePenalty rows. This closes
 -- that gap: every SafetyEvent insert evaluates against every matching rule
--- (Base on severity, Conditional on event type + count-within-month) and
--- applies whatever's due.
+-- and applies whatever's due.
+--
+-- MATCHING: independent of RuleType. A rule matches an event if every
+-- criterion it actually sets (SeverityID and/or EventTypeID) matches, and
+-- NULL on a rule's column means "don't care" about that dimension.
+-- CHK_PR_Target_Consistency only requires at least one of the two to be
+-- non-null -- it does NOT force Base<->Severity / Conditional<->EventType
+-- pairing, so a Base rule keyed on EventTypeID or a Conditional rule keyed
+-- on SeverityID (see schema.sql's own commented-out edge-case examples)
+-- both need to match correctly. RuleType only controls BEHAVIOR below
+-- (apply immediately vs. count-and-threshold), not which column is checked.
 --
 -- HARD DEPENDENCY: requires a DriverMonthlySafetyScore row to already exist
 -- for this driver's month (via sp_InitializeMonthlyScores) -- there's no
@@ -159,15 +169,18 @@ DELIMITER ;
 -- historical SafetyEvent data now requires initializing that historical
 -- month's score row FIRST.
 --
--- ONLY CORRECTLY HANDLES TimeWindowMonths = 1 (matching current seed data).
--- A Conditional rule's window is treated as "the calendar month this event
--- falls in," not a rolling N-month window -- forced by DriverScorePenalty
--- attaching to exactly one DriverMonthlySafetyScoreID, which a window
--- spanning a month boundary wouldn't cleanly map to. A future rule with
--- TimeWindowMonths > 1 would need this reworked, not just parameterized.
-
+-- ONLY CORRECTLY HANDLES TimeWindowMonths = 1 for Conditional rules --
+-- explicitly SIGNALs rather than silently mis-evaluating if this is ever
+-- violated. A Conditional rule's window is treated as "the calendar month
+-- this event falls in," not a rolling N-month window -- forced by
+-- DriverScorePenalty attaching to exactly one DriverMonthlySafetyScoreID.
+-- A true rolling window would double-count events that fall inside two
+-- overlapping monthly evaluations near a month boundary, which isn't
+-- solvable without changing what DriverScorePenalty attaches to -- so this
+-- fails loudly instead of shipping an approximately-correct number.
+ 
 DELIMITER //
-
+ 
 CREATE PROCEDURE sp_EvaluatePenaltiesForEvent(IN p_EventID VARCHAR(100))
 BEGIN
     DECLARE v_DriverID VARCHAR(20);
@@ -175,85 +188,96 @@ BEGIN
     DECLARE v_SeverityID SMALLINT UNSIGNED;
     DECLARE v_EventTimestamp TIMESTAMP;
     DECLARE v_ScoreID INT UNSIGNED;
-
+ 
     DECLARE v_Done INT DEFAULT FALSE;
     DECLARE v_RuleID SMALLINT UNSIGNED;
     DECLARE v_RuleType VARCHAR(20);
+    DECLARE v_RuleEventTypeID SMALLINT UNSIGNED;
+    DECLARE v_RuleSeverityID SMALLINT UNSIGNED;
     DECLARE v_MinEventCount TINYINT UNSIGNED;
     DECLARE v_TimeWindowMonths TINYINT UNSIGNED;
     DECLARE v_PenaltyPoints DECIMAL(5,2);
     DECLARE v_MatchCount INT;
     DECLARE v_AlreadyApplied INT;
-
-    -- Rules that could possibly apply to this event: a Base rule matching
-    -- its severity, or a Conditional rule matching its event type. Severity/
-    -- EventType values are captured below, before OPEN, since a cursor's
-    -- query is evaluated against variable values at OPEN time.
-    DECLARE cur CURSOR FOR
-        SELECT PenaltyRuleID, RuleType, MinEventCount, TimeWindowMonths, PenaltyPoints
+ 
+    -- See MATCHING note above -- deliberately not keyed off RuleType.
+    DECLARE cur CURSOR FOR -- Declaration order is important here -- the cursor must be declared before the CONTINUE HANDLER.
+        SELECT PenaltyRuleID, RuleType, EventTypeID, SeverityID, MinEventCount, TimeWindowMonths, PenaltyPoints
         FROM PenaltyRule
-        WHERE (RuleType = 'Base' AND SeverityID = v_SeverityID)
-           OR (RuleType = 'Conditional' AND EventTypeID = v_EventTypeID);
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_Done = TRUE;
-
+        WHERE (SeverityID IS NULL OR SeverityID = v_SeverityID)
+          AND (EventTypeID IS NULL OR EventTypeID = v_EventTypeID);
+        -- NOTE: The simplified WHERE SeverityID = v_SeverityID OR EventTypeID = v_EventTypeID is NOT correct 
+        -- it would match a rule that only sets one of the two, but not the other, and would skip rules that set the other dimension.
+        -- The above WHERE clause matches on whichever dimensions the rule actually sets, and ignores the ones it doesn't care about (NULL = "don't care").
+        -- This prevents a PenaltyRule that sets both SeverityID and EventTypeID from being applied to an event that only matches one of the two, which is the correct behavior.
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_Done = TRUE; -- Cursor loop termination handler
+ 
     SELECT DriverID, EventTypeID, SeverityID, EventTimestamp
     INTO v_DriverID, v_EventTypeID, v_SeverityID, v_EventTimestamp
     FROM SafetyEvent WHERE EventID = p_EventID;
-
+ 
     SELECT DriverMonthlySafetyScoreID INTO v_ScoreID
     FROM DriverMonthlySafetyScore
     WHERE DriverID = v_DriverID
       AND Month = MONTH(v_EventTimestamp)
       AND Year = YEAR(v_EventTimestamp);
-
+ 
     IF v_ScoreID IS NULL THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Cannot apply penalty: no DriverMonthlySafetyScore row exists for this driver/month. Run sp_InitializeMonthlyScores first.';
     END IF;
 
+    -- Loop through all matching PenaltyRule rows and apply penalties as appropriate
     OPEN cur;
     penalty_loop: LOOP
-        FETCH cur INTO v_RuleID, v_RuleType, v_MinEventCount, v_TimeWindowMonths, v_PenaltyPoints;
+        FETCH cur INTO v_RuleID, v_RuleType, v_RuleEventTypeID, v_RuleSeverityID, v_MinEventCount, v_TimeWindowMonths, v_PenaltyPoints;
         IF v_Done THEN
             LEAVE penalty_loop;
         END IF;
-
+ 
         IF v_RuleType = 'Base' THEN
-            -- One penalty per event -- every High/Critical/etc event incurs
-            -- its own deduction, guarded per-EventID so re-evaluation (if
-            -- this procedure is ever called again for the same event) can't
+            -- One penalty per event -- every matching event incurs its own
+            -- deduction, guarded per-EventID so re-evaluation (if this
+            -- procedure is ever called again for the same event) can't
             -- double-charge it.
             SELECT COUNT(*) INTO v_AlreadyApplied
             FROM DriverScorePenalty
             WHERE EventID = p_EventID AND PenaltyRuleID = v_RuleID;
-
+ 
             IF v_AlreadyApplied = 0 THEN
                 INSERT INTO DriverScorePenalty
                     (DriverMonthlySafetyScoreID, PenaltyRuleID, EventID, PointsDeducted, DateApplied)
                 VALUES
                     (v_ScoreID, v_RuleID, p_EventID, v_PenaltyPoints, v_EventTimestamp);
             END IF;
-
+ 
         ELSE -- Conditional
-            -- "More than N events of this type this month" -- strictly
-            -- greater than, matching the brief's wording exactly (N=3 means
-            -- the 4th event is what crosses it, not the 3rd).
+            IF v_TimeWindowMonths <> 1 THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Conditional PenaltyRule has TimeWindowMonths <> 1: not supported by sp_EvaluatePenaltiesForEvent. See procedure header comment for why.';
+            END IF;
+ 
+            -- "More than N events matching this rule's criteria this month" --
+            -- strictly greater than, matching the brief's wording exactly
+            -- (N=3 means the 4th event is what crosses it, not the 3rd).
+            -- Matches on whichever of EventTypeID/SeverityID this specific
+            -- rule actually set, same NULL = "don't care" logic as the cursor.
             SELECT COUNT(*) INTO v_MatchCount
             FROM SafetyEvent
             WHERE DriverID = v_DriverID
-              AND EventTypeID = v_EventTypeID
+              AND (v_RuleEventTypeID IS NULL OR EventTypeID = v_RuleEventTypeID)
+              AND (v_RuleSeverityID IS NULL OR SeverityID = v_RuleSeverityID)
               AND MONTH(EventTimestamp) = MONTH(v_EventTimestamp)
               AND YEAR(EventTimestamp) = YEAR(v_EventTimestamp);
-
+ 
             IF v_MatchCount > v_MinEventCount THEN
                 -- Fires once per month per rule -- once applied to this
-                -- month's score row, subsequent events of the same type
-                -- don't re-trigger it.
+                -- month's score row, subsequent events don't re-trigger it.
                 SELECT COUNT(*) INTO v_AlreadyApplied
                 FROM DriverScorePenalty
                 WHERE DriverMonthlySafetyScoreID = v_ScoreID
                   AND PenaltyRuleID = v_RuleID;
-
+ 
                 IF v_AlreadyApplied = 0 THEN
                     INSERT INTO DriverScorePenalty
                         (DriverMonthlySafetyScoreID, PenaltyRuleID, EventID, PointsDeducted, DateApplied)
@@ -274,7 +298,7 @@ CREATE TRIGGER TRG_SafetyEvent_AfterInsert_EvaluatePenalties
 AFTER INSERT ON SafetyEvent
 FOR EACH ROW
 BEGIN
-    CALL sp_EvaluatePenaltiesForEvent(NEW.EventID);
+    CALL sp_EvaluatePenaltiesForEvent(NEW.EventID); -- See sp_EvaluatePenaltiesForEvent at line 184 in 3.driver_eligibility_and_safety_event_triggers.sql for the full evaluation logic.
 END;
 //
 

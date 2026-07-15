@@ -109,12 +109,12 @@ BEGIN
     DECLARE v_NewState VARCHAR(50);
     DECLARE v_DriverID VARCHAR(20);
 
-    SET v_NewState = fn_EventReviewState(NEW.EventID);
+    SET v_NewState = fn_EventReviewState(NEW.EventID); -- See fn_EventReviewState at line 25 in 4.review_coaching_and_scoring_triggers.sql for the full aggregation logic.
 
     IF v_NewState IS NOT NULL THEN
-        SET @sfms_allow_reviewstate_write = 1;
+        SET @sfms_allow_reviewstate_write = 1; -- Direct write override flag, so the trigger can update SafetyEvent.ReviewState without tripping its own guard.
         UPDATE SafetyEvent SET ReviewState = v_NewState WHERE EventID = NEW.EventID;
-        SET @sfms_allow_reviewstate_write = NULL;
+        SET @sfms_allow_reviewstate_write = NULL; --- Clear the override flag so future direct writes are blocked again.
     END IF;
 
     -- With the BeforeInsert guard above, a freshly inserted row can never
@@ -123,7 +123,7 @@ BEGIN
     -- in case that guard is ever loosened later.
     IF v_NewState = 'Completed' THEN
         SELECT DriverID INTO v_DriverID FROM SafetyEvent WHERE EventID = NEW.EventID;
-        CALL sp_RecomputeDriverEligibility(v_DriverID);
+        CALL sp_RecomputeDriverEligibility(v_DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full eligibility logic.
     END IF;
 END;
 //
@@ -150,7 +150,7 @@ BEGIN
 
         IF v_NewState = 'Completed' THEN
             SELECT DriverID INTO v_DriverID FROM SafetyEvent WHERE EventID = NEW.EventID;
-            CALL sp_RecomputeDriverEligibility(v_DriverID);
+            CALL sp_RecomputeDriverEligibility(v_DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full eligibility logic.
         END IF;
     END IF;
 END;
@@ -162,9 +162,8 @@ DELIMITER ;
 -- ==========================================
 -- TRIGGERS: DriverScorePenalty - Score Cascade
 -- ==========================================
--- NOTE: assumes DriverMonthlySafetyScore.Score is stored-and-decremented
--- (per our earlier discussion), not computed-on-read. This trigger IS the
--- decrement -- nothing else updates that column.
+-- NOTE: assumes DriverMonthlySafetyScore.Score is stored-and-decremented not computed-on-read. 
+-- This trigger IS the decrement -- nothing else updates that column.
 
 DELIMITER //
 
@@ -220,7 +219,7 @@ BEGIN
 
     -- Step 5: recompute regardless -- covers the case where this penalty
     -- pushed the score below 50 for the first time.
-    CALL sp_RecomputeDriverEligibility(v_DriverID);
+    CALL sp_RecomputeDriverEligibility(v_DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full eligibility logic.
 END;
 //
 
@@ -257,7 +256,7 @@ BEGIN
     -- Only Retraining outcomes matter for eligibility; Safety Coaching and
     -- Licence Review never blocked in the first place, so nothing to clear.
     IF NEW.CoachingType = 'Retraining' AND OLD.Outcome <> NEW.Outcome THEN
-        CALL sp_RecomputeDriverEligibility(NEW.DriverID);
+        CALL sp_RecomputeDriverEligibility(NEW.DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full eligibility logic.
     END IF;
 END;
 //
@@ -270,7 +269,7 @@ AFTER INSERT ON CoachingRecord
 FOR EACH ROW
 BEGIN
     IF NEW.CoachingType = 'Retraining' AND NEW.Outcome <> 'Passed' THEN
-        CALL sp_RecomputeDriverEligibility(NEW.DriverID);
+        CALL sp_RecomputeDriverEligibility(NEW.DriverID); -- See sp_RecomputeDriverEligibility at line 39 in 3.driver_eligibility_and_safety_event_triggers.sql for the full eligibility logic.
     END IF;
 END;
 //
@@ -281,7 +280,7 @@ DELIMITER ;
 -- ==========================================
 -- SUPPORTING PROCEDURE: Monthly Score Initialization
 -- ==========================================
--- Creates a DriverMonthlySafetyScore row at Score = 100 for every eligible
+-- IMPORTANT: APPLICATION LAYER SIDE: Creates a DriverMonthlySafetyScore row at Score = 100 for every eligible
 -- driver for a given month/year. Not a trigger -- there's no DML event that
 -- means "a new month started," so this needs an explicit call, either from
 -- a MySQL scheduled EVENT (not built here) or an app-side monthly job.
