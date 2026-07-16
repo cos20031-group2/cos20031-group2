@@ -446,7 +446,6 @@ CREATE TABLE PartSupplier (
     -- suppliers are unrestricted in count.
     PrimaryPartNumber INT UNSIGNED GENERATED ALWAYS AS (IF(IsPrimary, PartNumber, NULL)) VIRTUAL,
     PRIMARY KEY (PartNumber, SupplierID),
-    CONSTRAINT UC_PartSupplier UNIQUE (PartNumber, SupplierID),
     CONSTRAINT UC_PS_OnePrimaryPerPart UNIQUE (PrimaryPartNumber), -- Ensures at most one primary supplier per part; backup suppliers (IsPrimary = FALSE) are not limited in count.
     CONSTRAINT FK_PS_Part FOREIGN KEY (PartNumber) REFERENCES Part(PartNumber),
     CONSTRAINT FK_PS_Supplier FOREIGN KEY (SupplierID) REFERENCES Supplier(SupplierID),
