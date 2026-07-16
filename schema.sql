@@ -439,9 +439,15 @@ CREATE TABLE PartSupplier (
     SupplierID SMALLINT UNSIGNED,
     IsPrimary BOOLEAN NOT NULL,
     UnitCost BIGINT UNSIGNED NOT NULL,
+    -- NULL whenever IsPrimary = FALSE, and PartNumber itself whenever
+    -- IsPrimary = TRUE. UNIQUE on this column then only restricts the
+    -- primary rows (MySQL allows unlimited NULLs in a UNIQUE index), so
+    -- exactly one primary supplier per part is still enforced while backup
+    -- suppliers are unrestricted in count.
+    PrimaryPartNumber INT UNSIGNED GENERATED ALWAYS AS (IF(IsPrimary, PartNumber, NULL)) VIRTUAL,
     PRIMARY KEY (PartNumber, SupplierID),
     CONSTRAINT UC_PartSupplier UNIQUE (PartNumber, SupplierID),
-    CONSTRAINT UC_PS_OnePrimaryOneBackup UNIQUE (PartNumber, IsPrimary), -- Ensures that for each part, there can be only one primary supplier. If IsPrimary is true for a supplier, it cannot be true for any other supplier for the same part.
+    CONSTRAINT UC_PS_OnePrimaryPerPart UNIQUE (PrimaryPartNumber), -- Ensures at most one primary supplier per part; backup suppliers (IsPrimary = FALSE) are not limited in count.
     CONSTRAINT FK_PS_Part FOREIGN KEY (PartNumber) REFERENCES Part(PartNumber),
     CONSTRAINT FK_PS_Supplier FOREIGN KEY (SupplierID) REFERENCES Supplier(SupplierID),
     CONSTRAINT CHK_PS_UnitCost CHECK (UnitCost > 0)

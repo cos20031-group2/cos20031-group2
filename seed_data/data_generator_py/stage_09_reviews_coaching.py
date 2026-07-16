@@ -125,7 +125,9 @@ def generate(rng, core_state, ref_state, event_state):
     coaching_updates = []
 
     # A few Licence Review records -- never automated, purely staff-initiated.
-    for _ in range(6):
+    # Proportional to driver count, preserving the original 6-per-45-driver ratio.
+    n_licence_review = max(2, round(len(core_state["drivers"]) * 6 / 45))
+    for _ in range(n_licence_review):
         did = rng.choice(active_driver_ids)
         c_date = config.WINDOW_START + timedelta(days=rng.randint(0, (config.TODAY - config.WINDOW_START).days - 10))
         resolved = rng.random() < 0.7
@@ -143,7 +145,7 @@ def generate(rng, core_state, ref_state, event_state):
     # A few Retraining enrolments made directly by staff, outside the
     # DriverScorePenalty cascade -- exercises TRG_CoachingRecord_AfterInsert's
     # eligibility suspension for a non-score reason.
-    manual_retraining_ids = rng.sample(active_driver_ids, k=min(4, len(active_driver_ids)))
+    manual_retraining_ids = rng.sample(active_driver_ids, k=min(max(2, round(len(active_driver_ids) * 4 / 45)), len(active_driver_ids)))
     for did in manual_retraining_ids:
         c_date = config.TODAY - timedelta(days=rng.randint(5, 60))
         this_id = coaching_id

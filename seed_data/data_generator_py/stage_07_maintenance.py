@@ -100,7 +100,9 @@ def generate(rng, core_state, cert_state, assign_state, alert_state, ref_state):
     open_job_vins = set()
     if in_op_vins:
         open_job_vins.add(in_op_vins[0])  # deliberate "emergency repair while In Operation" case
-    open_job_vins.update(other_vins[:2])
+    # Proportional to fleet size, preserving the original 2-per-60-vehicle ratio.
+    n_other_open = max(1, round(len(core_state["vins"]) * 2 / 60))
+    open_job_vins.update(other_vins[:n_other_open])
 
     def add_job(vin, date_opened, date_closed, schedule_id=None):
         nonlocal job_counter

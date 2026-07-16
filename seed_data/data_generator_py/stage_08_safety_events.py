@@ -158,8 +158,12 @@ def generate(rng, core_state, assign_state):
                     "Odometer": odometer,
                 })
 
-    _inject_burst(event_type_id=3, min_count=3, n_driver_months=3)  # >3 speeding/month
-    _inject_burst(event_type_id=6, min_count=2, n_driver_months=2)  # >2 fatigue warnings/month
+    # Proportional to driver count, preserving the original 3-per-45-driver
+    # and 2-per-45-driver ratios rather than a hardcoded absolute count.
+    n_speeding_bursts = max(2, round(len(eligible_drivers) * 3 / 45))
+    n_fatigue_bursts = max(2, round(len(eligible_drivers) * 2 / 45))
+    _inject_burst(event_type_id=3, min_count=3, n_driver_months=n_speeding_bursts)  # >3 speeding/month
+    _inject_burst(event_type_id=6, min_count=2, n_driver_months=n_fatigue_bursts)  # >2 fatigue warnings/month
 
     rows.sort(key=lambda r: r["EventTimestamp"])
     for i, r in enumerate(rows, start=1):

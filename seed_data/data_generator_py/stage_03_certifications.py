@@ -67,14 +67,22 @@ def generate(rng, core_state):
         did = driver["DriverID"]
         held_active = set()
 
-        # Everyone gets Standard License (id 1) -- required by most categories.
-        # TODO: Heavy Transport Truck (id 5) don't require Standard License.
-        cert_types_for_driver = [1]
+        # Standard License (id 1) -- required by 4 of the 5 vehicle categories
+        # (all but Heavy Transport Truck, which only needs Heavy Vehicle +
+        # Hazardous Goods), so most drivers get it, but it's not guaranteed --
+        # a driver who only ever drives Heavy Transport Trucks genuinely
+        # doesn't need it. High probability since Delivery Van and Service
+        # Vehicle (the two most common categories by fleet weight) need
+        # nothing else; the coverage-guarantee pass below backstops any
+        # category that ends up short regardless.
+        cert_types_for_driver = []
+        if rng.random() < 0.85:
+            cert_types_for_driver.append(1)
 
         # Randomly layer on specialised certs. Probabilities bumped above the
         # naive per-cert rate because categories 2 and 5 require *combinations*
         # (Heavy AND Refrigerated; Heavy AND Hazardous) -- independent 0.15-0.20
-        # rates left only ~1 eligible driver for those categories out of 45,
+        # rates left only ~5 eligible driver for those categories out of 500,
         # too thin a margin for the live "as of today" assignments in stage 5.
         if rng.random() < 0.42:
             cert_types_for_driver.append(2)  # Heavy Vehicle
@@ -107,7 +115,7 @@ def generate(rng, core_state):
     # Random assignment above can land badly for categories that need a
     # *combination* of certs (Refrigerated Truck needs 1+2+3, Heavy Transport
     # needs 2+5) -- a single unlucky RNG draw can leave a category with only
-    # 1 eligible driver out of 45, too thin for stage 5's live "as of today"
+    # 1 eligible driver out of many, too thin for stage 5's live "as of today"
     # assignments to reliably find someone. Top up directly instead of
     # re-tuning probabilities blindly.
     MIN_ELIGIBLE_DRIVERS = 250

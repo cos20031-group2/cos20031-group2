@@ -77,8 +77,10 @@ def generate(rng, core_state, cert_state):
 
     vins = list(core_state["vins"])
     rng.shuffle(vins)
-    n_live_in_operation = min(10, len(vins))
-    n_live_pending = min(5, len(vins) - n_live_in_operation)
+    # Proportional to fleet size, preserving the original 10-per-60-vehicle
+    # and 5-per-60-vehicle ratios rather than a hardcoded absolute count.
+    n_live_in_operation = min(max(1, round(len(vins) * 10 / 60)), len(vins))
+    n_live_pending = min(max(1, round(len(vins) * 5 / 60)), len(vins) - n_live_in_operation)
     live_in_operation_vins = set(vins[:n_live_in_operation])
     live_pending_vins = set(vins[n_live_in_operation:n_live_in_operation + n_live_pending])
 
