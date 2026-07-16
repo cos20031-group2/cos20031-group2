@@ -114,7 +114,7 @@ BEGIN
     IF v_NewState IS NOT NULL THEN
         SET @sfms_allow_reviewstate_write = 1; -- Direct write override flag, so the trigger can update SafetyEvent.ReviewState without tripping its own guard.
         UPDATE SafetyEvent SET ReviewState = v_NewState WHERE EventID = NEW.EventID;
-        SET @sfms_allow_reviewstate_write = NULL; --- Clear the override flag so future direct writes are blocked again.
+        SET @sfms_allow_reviewstate_write = NULL; -- Clear the override flag so future direct writes are blocked again.
     END IF;
 
     -- With the BeforeInsert guard above, a freshly inserted row can never
