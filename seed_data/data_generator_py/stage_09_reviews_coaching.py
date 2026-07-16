@@ -119,9 +119,17 @@ def generate(rng, core_state, ref_state, event_state):
             sql.update("EventReview", ", ".join(set_parts), f"ReviewID = {rid}")
 
     # ---------- Manual CoachingRecord ----------
+    # NOTE: CoachingRecordID is deliberately NOT assigned explicitly here.
+    # TRG_DriverScorePenalty_AfterInsert (fired during stage 08's SafetyEvent
+    # cascade, which runs before this file) also inserts into CoachingRecord
+    # without specifying an ID, relying on AUTO_INCREMENT -- so explicit low
+    # IDs here would collide with whatever the cascade already claimed. We
+    # let AUTO_INCREMENT handle these too, and identify rows for the
+    # follow-up UPDATE by natural key (DriverID, CoachingType, CoachingDate)
+    # instead, which is safe here since manual_retraining_ids draws distinct
+    # drivers and every row gets a distinct CoachingDate offset.
     active_driver_ids = [d["DriverID"] for d in core_state["drivers"] if d["EmploymentStatus"] == "Active"]
     coaching_rows = []
-    coaching_id = 1
     coaching_updates = []
 
     # A few Licence Review records -- never automated, purely staff-initiated.
@@ -137,10 +145,9 @@ def generate(rng, core_state, ref_state, event_state):
         else:
             completion, outcome = None, rng.choice(["Pending", "In Progress"])
         coaching_rows.append({
-            "CoachingRecordID": coaching_id, "DriverID": did, "CoachingType": "Licence Review",
+            "DriverID": did, "CoachingType": "Licence Review",
             "CoachingDate": c_date, "CompletionDate": completion, "Outcome": outcome,
         })
-        coaching_id += 1
 
     # A few Retraining enrolments made directly by staff, outside the
     # DriverScorePenalty cascade -- exercises TRG_CoachingRecord_AfterInsert's
@@ -148,36 +155,39 @@ def generate(rng, core_state, ref_state, event_state):
     manual_retraining_ids = rng.sample(active_driver_ids, k=min(max(2, round(len(active_driver_ids) * 4 / 45)), len(active_driver_ids)))
     for did in manual_retraining_ids:
         c_date = config.TODAY - timedelta(days=rng.randint(5, 60))
-        this_id = coaching_id
         coaching_rows.append({
-            "CoachingRecordID": this_id, "DriverID": did, "CoachingType": "Retraining",
+            "DriverID": did, "CoachingType": "Retraining",
             "CoachingDate": c_date, "CompletionDate": None, "Outcome": "Pending",
         })
-        coaching_id += 1
         # Resolve about half of them via a follow-up UPDATE, demonstrating
         # TRG_CoachingRecord_AfterUpdate's eligibility re-clear on Retraining
-        # outcome change.
+        # outcome change. c_date is always TODAY minus 5-60 days, so it can
+        # never collide with an auto-cascaded row's CoachingDate (which the
+        # trigger always sets to CURDATE(), i.e. exactly TODAY) -- the
+        # natural key below is guaranteed to match only this row.
         if rng.random() < 0.5:
             completion = c_date + timedelta(days=rng.randint(10, 40))
             outcome = rng.choice(["Passed", "Failed"])
-            coaching_updates.append((this_id, completion, outcome))
+            coaching_updates.append((did, c_date, completion, outcome))
 
     sql.comment(f"\nCoachingRecord -- {len(coaching_rows)} manually-enrolled rows "
                 "(Licence Review, plus Retraining enrolled directly by staff "
-                "outside the DriverScorePenalty cascade)")
+                "outside the DriverScorePenalty cascade). CoachingRecordID left "
+                "to AUTO_INCREMENT -- see note above.")
     sql.insert(
         "CoachingRecord",
-        ["CoachingRecordID", "DriverID", "CoachingType", "CoachingDate", "CompletionDate", "Outcome"],
+        ["DriverID", "CoachingType", "CoachingDate", "CompletionDate", "Outcome"],
         coaching_rows,
     )
 
     if coaching_updates:
-        sql.comment("\nResolve a subset of the manual Retraining enrolments")
-        for cid, completion, outcome in coaching_updates:
+        sql.comment("\nResolve a subset of the manual Retraining enrolments (matched by "
+                    "natural key, since we don't have their auto-generated IDs)")
+        for did, c_date, completion, outcome in coaching_updates:
             sql.update(
                 "CoachingRecord",
                 f"Outcome = {sql_str(outcome)}, CompletionDate = {sql_str(completion)}",
-                f"CoachingRecordID = {cid}",
+                f"DriverID = {sql_str(did)} AND CoachingType = 'Retraining' AND CoachingDate = {sql_str(c_date)}",
             )
 
     state["review_count"] = reviewed_count

@@ -99,7 +99,9 @@ def generate(rng, core_state, cert_state):
         is_live_op = vin in live_in_operation_vins
         is_live_pending = vin in live_pending_vins
 
-        n_assignments = rng.randint(3, 5)
+        assign_lo = max(1, round(3 * config.WINDOW_DURATION_RATIO))
+        assign_hi = max(assign_lo, round(5 * config.WINDOW_DURATION_RATIO))
+        n_assignments = rng.randint(assign_lo, assign_hi)
         n_historical = max(1, n_assignments - (1 if (is_live_op or is_live_pending) else 0))
 
         cursor_dt = window_start_dt

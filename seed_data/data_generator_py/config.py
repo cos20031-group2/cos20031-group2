@@ -34,6 +34,16 @@ N_MECHANICS = 100
 TODAY = date.today()
 WINDOW_START = TODAY - relativedelta(months=12)
 
+# Some generators (VehicleAssignment count, PredictiveAlert count, standalone
+# ScheduledService count, per-vehicle MaintenanceJob target) compute a fixed
+# "total over the whole window" rather than a per-month rate, so they don't
+# automatically scale when the window's duration changes (unlike SafetyEvent,
+# which is generated per-month and scales naturally). This ratio lets those
+# stages preserve the original density (events per unit time) that they were
+# calibrated against, based on the original 6-month design window.
+_REFERENCE_WINDOW_DAYS = 182  # ~6 months, the original calibration basis
+WINDOW_DURATION_RATIO = (TODAY - WINDOW_START).days / _REFERENCE_WINDOW_DAYS
+
 # Convenience list of (month, year) tuples covered by the window, oldest first.
 # Used to drive sp_InitializeMonthlyScores calls and SafetyEvent distribution.
 def month_year_range(start: date, end: date):

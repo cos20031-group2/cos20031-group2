@@ -22,11 +22,25 @@ than being pre-marked Completed by this stage.
 Standalone preventive ScheduledService rows (no alert behind them) are
 generated the same way -- inserted directly, no trigger involvement at all
 since there's no INSERT trigger on ScheduledService itself.
+
+STATEMENT ORDER MATTERS: ScheduledService.ScheduleID is AUTO_INCREMENT, and
+we assign it explicit values (1, 2, 3...) for our manually-inserted rows so
+stage 07 can reference them as MaintenanceJob.ScheduleID. sp_AutoScheduleFromAlert
+ALSO inserts into ScheduledService without specifying an ID, relying on
+AUTO_INCREMENT -- so if any escalated PredictiveAlert row were inserted
+before our manual ScheduledService rows, its auto-generated row would claim
+ScheduleID=1 and collide with ours. We avoid this by inserting PredictiveAlert
+in two statements -- every non-escalated row first, then our manual
+ScheduledService rows (claiming IDs 1..N while the table is still empty),
+then the handful of live-escalation PredictiveAlert rows last, so
+AUTO_INCREMENT only ever hands out IDs starting after our highest explicit one.
 """
 
 from datetime import datetime, time, timedelta
 from utils import SqlFile
 import config
+
+_ESCALATED_STATUSES = ("Scheduled For Inspection", "Urgent Repair Standby")
 
 
 def generate(rng, core_state):
@@ -36,7 +50,9 @@ def generate(rng, core_state):
         "ScheduledService rows. Historical escalations are inserted "
         "Resolved-with-manual-schedule to avoid sp_AutoScheduleFromAlert's "
         "CURDATE()-based ScheduledDate; only a few live-today alerts go "
-        "through the real trigger.",
+        "through the real trigger, and are inserted LAST so their "
+        "auto-generated ScheduledService rows can't collide with our "
+        "explicit ScheduleID values.",
     )
     state = {}
 
@@ -50,7 +66,7 @@ def generate(rng, core_state):
     schedule_id = 1
     linked_open_schedules = []  # for stage 07 to close via a real MaintenanceJob
 
-    n_alerts = int(len(vins) * 1.5)
+    n_alerts = int(len(vins) * 1.5 * config.WINDOW_DURATION_RATIO)
     for _ in range(n_alerts):
         vin = rng.choice(vins)
         alert_type_id = rng.choice(list(config.ALERT_TYPES.keys()))
@@ -128,17 +144,16 @@ def generate(rng, core_state):
             # NOTE: no manual ScheduledService row here -- TRG_PredictiveAlert_AfterInsert
             # calls sp_AutoScheduleFromAlert for real when this INSERT runs.
 
-    sql.comment(f"PredictiveAlert -- {len(alert_rows)} rows "
-                f"({sum(1 for r in alert_rows if r['AlertStatus'] in ('Scheduled For Inspection', 'Urgent Repair Standby'))} "
-                f"live escalations that will fire sp_AutoScheduleFromAlert for real)")
-    sql.insert(
-        "PredictiveAlert",
-        ["AlertID", "VIN", "AlertTypeID", "DateGenerated", "ActionTaken", "AlertStatus", "ResolutionDate"],
-        alert_rows,
-    )
+    alert_cols = ["AlertID", "VIN", "AlertTypeID", "DateGenerated", "ActionTaken", "AlertStatus", "ResolutionDate"]
+    non_escalated_alerts = [r for r in alert_rows if r["AlertStatus"] not in _ESCALATED_STATUSES]
+    escalated_alerts = [r for r in alert_rows if r["AlertStatus"] in _ESCALATED_STATUSES]
+
+    sql.comment(f"PredictiveAlert -- {len(non_escalated_alerts)} non-escalated rows "
+                "(inserted first; none of these fire sp_AutoScheduleFromAlert)")
+    sql.insert("PredictiveAlert", alert_cols, non_escalated_alerts)
 
     # ---------- Standalone preventive ScheduledService (no alert) ----------
-    n_standalone = max(10, len(vins) // 4)
+    n_standalone = max(10, round(len(vins) * config.WINDOW_DURATION_RATIO / 4))
     for _ in range(n_standalone):
         vin = rng.choice(vins)
         r = rng.random()
@@ -171,13 +186,20 @@ def generate(rng, core_state):
             })
             schedule_id += 1
 
-    sql.comment(f"\nScheduledService -- {len(schedule_rows)} rows "
-                f"({len(linked_open_schedules)} left open for stage 07 to close via a real MaintenanceJob)")
+    sql.comment(f"\nScheduledService -- {len(schedule_rows)} rows, all with explicit ScheduleID "
+                f"({len(linked_open_schedules)} left open for stage 07 to close via a real MaintenanceJob). "
+                "Inserted here, before any escalated PredictiveAlert, so AUTO_INCREMENT hasn't handed "
+                "out any IDs yet and our explicit values can't collide with sp_AutoScheduleFromAlert's.")
     sql.insert(
         "ScheduledService",
         ["ScheduleID", "VIN", "ScheduledDate", "Reason", "AlertID", "CompletionDate", "Status"],
         schedule_rows,
     )
+
+    sql.comment(f"\nPredictiveAlert -- {len(escalated_alerts)} live escalations, inserted LAST. "
+                "Each fires sp_AutoScheduleFromAlert for real; AUTO_INCREMENT now continues from "
+                f"{schedule_id} onward (past our highest explicit ScheduleID), so no collision.")
+    sql.insert("PredictiveAlert", alert_cols, escalated_alerts)
 
     state["linked_open_schedules"] = linked_open_schedules
     state["alert_count"] = len(alert_rows)

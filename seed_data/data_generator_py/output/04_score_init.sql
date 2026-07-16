@@ -1,7 +1,7 @@
 -- ==========================================================
 -- 04 - MONTHLY SCORE INITIALIZATION
 -- ==========================================================
--- Calls sp_InitializeMonthlyScores for every calendar month touched by the 6-month window, so DriverMonthlySafetyScore rows exist before any SafetyEvent is inserted in stage 08.
+-- Calls sp_InitializeMonthlyScores for every calendar month touched by the n-month window, so DriverMonthlySafetyScore rows exist before any SafetyEvent is inserted in stage 08.
 -- ==========================================================
 
 CALL sp_InitializeMonthlyScores(7, 2025);

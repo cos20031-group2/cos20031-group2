@@ -209,9 +209,11 @@ def generate(rng, core_state, cert_state, assign_state, alert_state, ref_state):
                                     linked_alert_id=item.get("AlertID"))
 
     # ---------- 2. Standalone jobs (top up each vehicle to a small target) ----------
+    target_cap = max(3, round(3 * config.WINDOW_DURATION_RATIO))
+    target_choices = [max(1, round(c * config.WINDOW_DURATION_RATIO)) for c in (1, 1, 2)]
     for vin in core_state["vins"]:
         existing = len(schedules_by_vin.get(vin, []))
-        target = min(3, max(existing, rng.choice([1, 1, 2])))
+        target = min(target_cap, max(existing, rng.choice(target_choices)))
         for _ in range(target - existing):
             placed = False
             date_opened = date_closed = None
