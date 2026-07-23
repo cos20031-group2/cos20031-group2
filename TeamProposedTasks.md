@@ -56,16 +56,15 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 
 ---
 
-## CRUD Dashboard App (optional, finish the other tasks first)
+## CRUD Dashboard App (finish the other tasks first)
 
 - [ ] Confirm tech stack as a team
 - [ ] Role-based dashboards:
-  - [ ] Driver
-  - [ ] Mechanic
-  - [ ] Safety Staff
-  - [ ] Fleet Manager
-  - [ ] Workshop Manager
-  - [ ] Admin (possibly)
+  - [ ] Driver - (DriverD001, 1234)
+  - [ ] Mechanic - (MechanicME001, 1234)
+  - [ ] Safety Staff - (SafetyStaff001, 1234)
+  - [ ] Fleet Manager - (FleetManager001, 1234)
+  - [ ] Workshop Manager (WorkshopManager001, 1234)
 - [ ] Each dashboard pulls from its relevant slice of `6_business_queries.sql`
 - [ ] Auth/login wired to `User` / `Role`
 
