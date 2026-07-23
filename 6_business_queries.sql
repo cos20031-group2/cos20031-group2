@@ -43,7 +43,7 @@ ORDER BY se.EventTimestamp DESC;
 SELECT
     dr.DriverID, dr.FullName, d.DepotName, dms.Month, dms.Year, dms.Score,
     (SELECT COUNT(*) FROM SafetyEvent se
-     WHERE se.DriverID = dr.DriverID
+    WHERE se.DriverID = dr.DriverID
        AND MONTH(se.EventTimestamp) = dms.Month
        AND YEAR(se.EventTimestamp) = dms.Year) AS EventsThisMonth
 FROM DriverMonthlySafetyScore dms

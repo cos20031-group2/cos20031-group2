@@ -24,7 +24,7 @@
 
 ---
 
-Option A — Nullable FK on User
+Option A — Nullable FK on User (We decided this option)
 
 Role(RoleID, RoleName)
 User(UserID, Username, PasswordHash, RoleID FK,
@@ -37,24 +37,6 @@ CHECK constraint enforces "exactly one FK populated, or none depending on role."
 
 Pro: Driver, Mechanic, SafetyStaff and their existing triggers stay untouched — zero regression risk on code that already works.
 Con: three nullable FK columns sitting mostly empty on any given row is a bit of a smell, and doesn't read as "clean" on an ERD.
-
----
-
-Option B — Person/Employee Supertype
-
-Person(PersonID, FullName, ContactInfo, ...)
-Driver(PersonID FK PK, ...driver-specific fields...)
-Mechanic(PersonID FK PK, ...mechanic-specific fields...)
-SafetyStaff(PersonID FK PK, ...)
-Manager(PersonID FK PK, ManagerType ENUM('Fleet','Workshop'))
-User(UserID, Username, PasswordHash, RoleID FK, PersonID FK)
-
-
-Every human in the system is a Person first; Driver/Mechanic/SafetyStaff/Manager become subtype tables sharing that PK.
-User needs exactly one FK (PersonID) — no NULL-juggling.
-
-Pro: textbook supertype/subtype modeling — reads well on an ERD, and is the "more correct" answer if this were graded purely on modeling elegance.
-Con: means restructuring Driver/Mechanic/SafetyStaff (renaming their PKs to PersonID, re-pointing every existing FK in the trigger files that references DriverID/MechanicID/ReviewStaffID) — real risk to code that already works correctly, for a payoff that's mostly cosmetic at this schema's scale.
 
 ---
 
