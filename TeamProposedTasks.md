@@ -74,7 +74,7 @@ Con: means restructuring Driver/Mechanic/SafetyStaff (renaming their PKs to Pers
 
 ---
 
-## CRUD Dashboard App (required)
+## CRUD Dashboard App (optional, finish the other tasks first)
 
 - [ ] Confirm tech stack as a team
 - [ ] Role-based dashboards:

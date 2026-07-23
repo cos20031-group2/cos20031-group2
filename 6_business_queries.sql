@@ -293,6 +293,8 @@ ORDER BY mj.JobID, ma.ActivityID;
 -- claims on parts where this supplier is the PRIMARY supplier, assuming primary is
 -- who normally fulfils the order. Flag as an estimate, not a hard fact, in any UI.
 -- NOTE: May need extra checking in the schema.sql
+-- SUGGESTION: a proper PartReceipt/lot table (PartNumber, SupplierID, QuantityReceived, DateReceived, ...), with ActivityPart referencing a specific receipt/lot instead of just a bare SupplierID.
+-- SUGGESTION: I'm now wondering how people are supposed to know what parts from what supplier from what order are they from if the table just shows the whole stock, like a does a mechanic have to find the parts, look it up as to where it's from (possibly another table), and then log it?
 SELECT
     s.SupplierID, s.SupplierName, s.DeliveryLeadTime,
     COUNT(DISTINCT ps.PartNumber) AS PartsSupplied,
