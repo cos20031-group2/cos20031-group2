@@ -120,6 +120,26 @@ MECHANIC_CERT_TYPES = {
     4: "Heavy Vehicle Mechanic License",
 }
 
+# RoleID -> name, matches schema.sql section 7A's seeded INSERT order exactly.
+ROLES = {
+    1: "Driver",
+    2: "Mechanic",
+    3: "Safety Staff",
+    4: "Fleet Manager",
+    5: "Workshop Manager",
+    6: "Admin",
+}
+ROLES_BY_NAME = {v: k for k, v in ROLES.items()}
+
+# Fleet Manager / Workshop Manager / Admin AppUser rows have no linked
+# operational entity (CHK_AppUser_FK_Consistency's "all NULL" branch), so
+# their count isn't derived from an existing table the way Driver/Mechanic/
+# Safety Staff accounts are -- one manager pairing per depot (mirroring the
+# existing 1:1 Workshop-per-Depot pattern), plus a small fixed Admin count.
+N_FLEET_MANAGERS = N_DEPOTS
+N_WORKSHOP_MANAGERS = N_DEPOTS
+N_ADMINS = 3
+
 # ActivityTypeID -> (name, RequiredMechanicCertificationTypeID)
 ACTIVITY_TYPES = {
     1: ("Routine Inspection", 1),

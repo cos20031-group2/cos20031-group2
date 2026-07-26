@@ -508,11 +508,11 @@ INSERT INTO Role (RoleName) VALUES
 -- ==========================================
 
 -- 1. ADMIN (Full system access, manages DB structure and all data)
-CREATE USER 'admin_db'@'localhost' IDENTIFIED BY 'AdminSecurePass!';
+CREATE IF NOT EXISTS USER 'admin_db'@'localhost' IDENTIFIED BY 'AdminSecurePass!';
 GRANT ALL PRIVILEGES ON SmartFleet.* TO 'admin_db'@'localhost' WITH GRANT OPTION;
 
 -- 2. FLEET MANAGER (Operational access: Vehicles, Drivers, Depots, Safety)
-CREATE USER 'fleet_manager_db'@'localhost' IDENTIFIED BY 'FleetSecurePass!';
+CREATE IF NOT EXISTS USER 'fleet_manager_db'@'localhost' IDENTIFIED BY 'FleetSecurePass!';
 -- Fleet & Driver Management
 GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Vehicle TO 'fleet_manager_db'@'localhost';
 GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Driver TO 'fleet_manager_db'@'localhost';
@@ -533,7 +533,7 @@ GRANT SELECT ON SmartFleet.EventSeverity TO 'fleet_manager_db'@'localhost';
 -- (By not granting them, they are denied by default)
 
 -- 3. WORKSHOP MANAGER (Operational access: Maintenance, Mechanics, Parts)
-CREATE USER 'workshop_manager_db'@'localhost' IDENTIFIED BY 'WorkshopSecurePass!';
+CREATE IF NOT EXISTS USER 'workshop_manager_db'@'localhost' IDENTIFIED BY 'WorkshopSecurePass!';
 GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceJob TO 'workshop_manager_db'@'localhost';
 GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceActivity TO 'workshop_manager_db'@'localhost';
 GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MechanicWorkSession TO 'workshop_manager_db'@'localhost';
@@ -548,7 +548,7 @@ GRANT SELECT ON SmartFleet.Vehicle TO 'workshop_manager_db'@'localhost';
 GRANT SELECT ON SmartFleet.PredictiveAlert TO 'workshop_manager_db'@'localhost';
 
 -- 4. SAFETY STAFF (Read/Review access to safety events)
-CREATE USER 'safety_staff_db'@'localhost' IDENTIFIED BY 'SafetySecurePass!';
+CREATE IF NOT EXISTS USER 'safety_staff_db'@'localhost' IDENTIFIED BY 'SafetySecurePass!';
 GRANT SELECT, UPDATE ON SmartFleet.SafetyEvent TO 'safety_staff_db'@'localhost';
 GRANT SELECT, INSERT, UPDATE ON SmartFleet.EventReview TO 'safety_staff_db'@'localhost';
 GRANT SELECT ON SmartFleet.Driver TO 'safety_staff_db'@'localhost';
@@ -556,14 +556,14 @@ GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'safety_staff_db'@'localh
 GRANT SELECT ON SmartFleet.CoachingRecord TO 'safety_staff_db'@'localhost';
 
 -- 5. DRIVER (Read-only access to their own data)
-CREATE USER 'driver_db'@'localhost' IDENTIFIED BY 'DriverSecurePass!';
+CREATE IF NOT EXISTS USER 'driver_db'@'localhost' IDENTIFIED BY 'DriverSecurePass!';
 GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'driver_db'@'localhost';
 GRANT SELECT ON SmartFleet.VehicleAssignment TO 'driver_db'@'localhost';
 GRANT SELECT ON SmartFleet.SafetyEvent TO 'driver_db'@'localhost';
 GRANT SELECT ON SmartFleet.DriverCertification TO 'driver_db'@'localhost';
 
 -- 6. MECHANIC (Read-only for jobs, update their own work sessions)
-CREATE USER 'mechanic_db'@'localhost' IDENTIFIED BY 'MechanicSecurePass!';
+CREATE IF NOT EXISTS USER 'mechanic_db'@'localhost' IDENTIFIED BY 'MechanicSecurePass!';
 GRANT SELECT ON SmartFleet.MaintenanceJob TO 'mechanic_db'@'localhost';
 GRANT SELECT ON SmartFleet.MaintenanceActivity TO 'mechanic_db'@'localhost';
 GRANT INSERT, UPDATE ON SmartFleet.MechanicWorkSession TO 'mechanic_db'@'localhost';

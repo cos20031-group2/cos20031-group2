@@ -12,6 +12,7 @@ import stage_06_alerts_schedules
 import stage_07_maintenance
 import stage_08_safety_events
 import stage_09_reviews_coaching
+import stage_10_app_users
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -73,6 +74,11 @@ sql9.write(os.path.join(OUT_DIR, "09_reviews_coaching.sql"))
 print("Stage 09 written.")
 print("Reviews:", review_state["review_count"], "Closed:", review_state["closed_review_count"])
 print("CoachingRecords:", review_state["coaching_record_count"])
+
+sql10, appuser_state = stage_10_app_users.generate(rng, core_state, ref_state)
+sql10.write(os.path.join(OUT_DIR, "10_app_users.sql"))
+print("Stage 10 written.")
+print("AppUsers:", appuser_state["app_user_count"])
 
 
 
