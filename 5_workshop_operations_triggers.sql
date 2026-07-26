@@ -82,6 +82,20 @@ DELIMITER ;
 -- used on a job, despite the brief calling out reorder-threshold monitoring
 -- as a real workshop-manager need (p.13) and the schema already having both
 -- CurrentStock and ReorderThreshold to support it.
+--
+-- KNOWN GAP, ACCEPTED: nothing in this schema ever INCREASES CurrentStock --
+-- ActivityPart below only ever moves it down (usage) or back up (usage
+-- reversed). Restocking is deliberately left as a direct
+-- `UPDATE Part SET CurrentStock = CurrentStock + N` from the app/ops
+-- process, not a captured, audited event. A dedicated receipt-tracking
+-- table (supplier, quantity, date, price per delivery) was built and fully
+-- tested for this at one point -- see CHANGELOG_part_receipt.md -- and
+-- rolled back: its only real payoff beyond this direct-update convention
+-- was historical price-trend reporting, which nobody had actually asked
+-- for and which duplicated ground already covered by
+-- 6_business_queries.sql Q29 (current price comparison across suppliers).
+-- Revisit if either audited restocking or price-trend history becomes an
+-- actual requirement.
 
 DELIMITER //
 

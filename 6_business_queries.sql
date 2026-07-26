@@ -6,10 +6,18 @@
 -- implied by the Part/Supplier/WarrantyClaim/MechanicCertification tables.
 --
 -- Depends on: schema.sql. No DDL/DML side effects -- pure SELECTs.
--- Parameterized queries use `?` positional placeholders (app-bound via
--- prepared statements). Optional-filter queries bind each value twice --
--- once for the equality check, once for the accompanying IS NULL check --
--- a standard idiom for "filter if provided, ignore if NULL".
+--
+-- FLEXIBILITY PASS: every query below that takes a `?` is meant to be called
+-- with every optional filter available, not just the ones a given screen
+-- happens to use that day -- "search by X" requests turned out to cover most
+-- of this file, not just the ones originally built that way. Each optional
+-- filter uses the `(col = ? OR ? IS NULL)` idiom: bind the same value twice
+-- per filter (once for the equality check, once for the NULL check), so
+-- "don't filter on this" is just passing NULL for that pair. MySQL prepared
+-- statements can't bind a column name into ORDER BY, only values -- dynamic
+-- sort-by-column is therefore an app-layer concern (an allow-listed set of
+-- sortable columns, string-built after validation), not something these
+-- queries attempt to solve themselves.
 -- ==========================================================
 
 
@@ -17,9 +25,8 @@
 -- SECTION A: FLEET SAFETY OPERATIONS STAFF
 -- ==========================================
 
--- Q1: Incident review feed -- "Review driver incidents"
--- TODO: list and sort out all events that are pending, in review, or completed, with the most recent first. Include all relevant details.
--- TODO: maybe sort by driver, vehicle, depot, etc.?
+-- Q1: Incident review feed -- "Review driver incidents". Optional ReviewState /
+-- DriverID / DepotID / VIN filters.
 SELECT
     se.EventID, se.EventTimestamp, se.VIN, v.Model, v.Manufacturer,
     d.DepotName, se.DriverID, dr.FullName AS DriverName,
@@ -34,40 +41,61 @@ JOIN EventType et ON et.EventTypeID = se.EventTypeID
 JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
 LEFT JOIN EventReview er ON er.EventID = se.EventID
 LEFT JOIN SafetyStaff ss ON ss.ReviewStaffID = er.ReviewerStaffID
+WHERE (se.ReviewState = ? OR ? IS NULL)
+  AND (se.DriverID = ? OR ? IS NULL)
+  AND (se.DepotID = ? OR ? IS NULL)
+  AND (se.VIN = ? OR ? IS NULL)
 ORDER BY se.EventTimestamp DESC;
 
 
--- Q2: High-risk drivers this month, worst score first -- "Monitor high-risk drivers"
--- TODO: maybe expand the data into listing out penalty rules applied per driver.
--- TODO: maybe fliter by month and so on too, don't lock it to current month or so on only.
+-- Q2a: High-risk drivers, worst score first -- "Monitor high-risk drivers".
+-- Month/Year now optional, defaulting to the current month when not supplied
+-- -- previously hardcoded to "this month only".
 SELECT
     dr.DriverID, dr.FullName, d.DepotName, dms.Month, dms.Year, dms.Score,
     (SELECT COUNT(*) FROM SafetyEvent se
-    WHERE se.DriverID = dr.DriverID
+     WHERE se.DriverID = dr.DriverID
        AND MONTH(se.EventTimestamp) = dms.Month
        AND YEAR(se.EventTimestamp) = dms.Year) AS EventsThisMonth
 FROM DriverMonthlySafetyScore dms
 JOIN Driver dr ON dr.DriverID = dms.DriverID
 JOIN Depot d ON d.DepotID = dms.DepotID
-WHERE dms.Month = MONTH(CURDATE()) AND dms.Year = YEAR(CURDATE())
+WHERE dms.Month = COALESCE(?, MONTH(CURDATE()))
+  AND dms.Year = COALESCE(?, YEAR(CURDATE()))
 ORDER BY dms.Score ASC;
 
+-- Q2b: Penalty breakdown for one driver's month -- the "why" behind Q2's
+-- score. Separate query rather than folding into Q2 since it's a different
+-- grain (per-penalty, not per-driver-month) -- would multiply Q2's rows per
+-- driver instead of adding a column. Param: DriverMonthlySafetyScoreID (from Q2).
+SELECT pr.RuleType, pr.RuleDescription, dsp.EventID, dsp.PointsDeducted, dsp.DateApplied
+FROM DriverScorePenalty dsp
+JOIN PenaltyRule pr ON pr.PenaltyRuleID = dsp.PenaltyRuleID
+WHERE dsp.DriverMonthlySafetyScoreID = ?
+ORDER BY dsp.DateApplied;
 
--- Q3: Safety trends by depot, month-on-month -- "Compare safety trends between depots"
--- TODO: a graph would be nice, maybe in app layer.
--- TODO: sort by types of events and severity level.
+
+-- Q3: Safety trends by depot, month-on-month -- "Compare safety trends
+-- between depots". EventType added as its own breakdown dimension
+-- (previously only broken out by severity), and every dimension is now
+-- also an optional drill-down filter.
 SELECT
     d.DepotName, YEAR(se.EventTimestamp) AS Yr, MONTH(se.EventTimestamp) AS Mo,
-    sev.SeverityLevel, COUNT(*) AS EventCount
+    et.EventType, sev.SeverityLevel, COUNT(*) AS EventCount
 FROM SafetyEvent se
 JOIN Depot d ON d.DepotID = se.DepotID
+JOIN EventType et ON et.EventTypeID = se.EventTypeID
 JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
-GROUP BY d.DepotName, YEAR(se.EventTimestamp), MONTH(se.EventTimestamp), sev.SeverityLevel
-ORDER BY d.DepotName, Yr, Mo, sev.SeverityLevel;
+WHERE (se.DepotID = ? OR ? IS NULL)
+  AND (se.EventTypeID = ? OR ? IS NULL)
+  AND (se.SeverityID = ? OR ? IS NULL)
+GROUP BY d.DepotName, YEAR(se.EventTimestamp), MONTH(se.EventTimestamp), et.EventType, sev.SeverityLevel
+ORDER BY d.DepotName, Yr, Mo, et.EventType, sev.SeverityLevel;
 
 
--- Q4: Licence expiry tracker (expiring within 30 days, or already past) -- "Track licence expiry dates"
--- TODO: sort by driver and/or license type
+-- Q4: Licence expiry tracker -- "Track licence expiry dates". Optional
+-- DriverID / DriverCertificationTypeID filters on top of the existing
+-- expiring-within-30-days window.
 SELECT
     dr.DriverID, dr.FullName, dct.DriverCertificationType,
     dc.IssueDate, dc.ExpiryDate, dc.Status,
@@ -77,38 +105,48 @@ JOIN Driver dr ON dr.DriverID = dc.DriverID
 JOIN DriverCertificationType dct ON dct.DriverCertificationTypeID = dc.DriverCertificationTypeID
 WHERE dc.Status IN ('Active', 'Reinstated')
   AND dc.ExpiryDate <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+  AND (dr.DriverID = ? OR ? IS NULL)
+  AND (dc.DriverCertificationTypeID = ? OR ? IS NULL)
 ORDER BY dc.ExpiryDate ASC;
 
 
--- Q5a: Unresolved SAFETY EVENT reviews -- "Monitor unresolved incidents" (review side)
--- TODO: sort by vehicle and possibly serverity level
+-- Q5a: Unresolved SAFETY EVENT reviews -- "Monitor unresolved incidents"
+-- (review side). Optional VIN / SeverityID filters.
 SELECT se.EventID, se.EventTimestamp, se.DriverID, se.VIN, sev.SeverityLevel, se.ReviewState
 FROM SafetyEvent se
 JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
 WHERE se.ReviewState NOT IN ('Completed', 'No Review Required')
+  AND (se.VIN = ? OR ? IS NULL)
+  AND (se.SeverityID = ? OR ? IS NULL)
 ORDER BY se.EventTimestamp ASC;
 
--- Q5b: Unresolved PREDICTIVE ALERTS -- "Monitor unresolved incidents" (maintenance-telemetry side)
--- TODO: search by vehicle
+-- Q5b: Unresolved PREDICTIVE ALERTS -- "Monitor unresolved incidents"
+-- (maintenance-telemetry side). Optional VIN filter.
 SELECT pa.AlertID, pa.VIN, at.AlertType, pa.DateGenerated, pa.AlertStatus, pa.ActionTaken
 FROM PredictiveAlert pa
 JOIN AlertType at ON at.AlertTypeID = pa.AlertTypeID
 WHERE pa.AlertStatus <> 'Resolved'
+  AND (pa.VIN = ? OR ? IS NULL)
 ORDER BY pa.DateGenerated ASC;
 
 
--- Q6: Coaching outcomes report -- "Record coaching outcomes"
--- TODO: sort by Outcome (Failed, In Progress, Pending, etc.), search by driver
+-- Q6: Coaching outcomes report -- "Record coaching outcomes". Optional
+-- DriverID / Outcome filters.
 SELECT cr.CoachingRecordID, cr.DriverID, dr.FullName, cr.CoachingType,
        cr.CoachingDate, cr.CompletionDate, cr.Outcome
 FROM CoachingRecord cr
 JOIN Driver dr ON dr.DriverID = cr.DriverID
+WHERE (cr.DriverID = ? OR ? IS NULL)
+  AND (cr.Outcome = ? OR ? IS NULL)
 ORDER BY cr.CoachingDate DESC;
 
 
--- Q7: Drivers requiring retraining -- "Identify drivers requiring retraining"
--- Same predicate sp_RecomputeDriverEligibility uses internally, exposed as a report.
--- NOTE: covereved by TRIGGERs, automatically create coaching record if driver's score below 75 or 50
+-- Q7: Drivers requiring retraining -- "Identify drivers requiring
+-- retraining". Same predicate sp_RecomputeDriverEligibility uses
+-- internally, exposed as a report. Deliberately Retraining-only: that's the
+-- one that actually blocks DrivingEligibility (see
+-- 3.driver_eligibility_and_safety_event_triggers.sql). The <=75 Safety
+-- Coaching cases -- non-blocking -- already surface through Q6.
 SELECT DISTINCT cr.DriverID, dr.FullName, cr.CoachingDate, cr.Outcome
 FROM CoachingRecord cr
 JOIN Driver dr ON dr.DriverID = cr.DriverID
@@ -116,7 +154,7 @@ WHERE cr.CoachingType = 'Retraining' AND cr.Outcome <> 'Passed';
 
 
 -- Q8: Flexible incident search -- filter by driver, vehicle, depot, event type,
--- severity, date range (all optional). 12 positional params, each bound twice.
+-- severity, date range (all optional). 14 positional params, each bound twice.
 SELECT se.EventID, se.EventTimestamp, se.DriverID, se.VIN, d.DepotName,
        et.EventType, sev.SeverityLevel, se.Odometer
 FROM SafetyEvent se
@@ -149,37 +187,47 @@ WHERE DriverID = ?
 ORDER BY Year, Month;
 
 
--- Q10: Drivers ranked by speeding-incident count, worst first, no cutoff --
--- "Drivers with repeated speeding incidents"
--- WOULD BE NICE TO HAVE: count by other event types, not required as of now
-SELECT dr.DriverID, dr.FullName, COUNT(*) AS SpeedingEventCount
+-- Q10: Drivers ranked by incident count for a given event type, worst first, no
+-- cutoff -- "Drivers with repeated speeding incidents". Defaults to speeding when
+-- no EventType is given, but now takes an override so any event type can be ranked
+-- the same way. NOTE: single param here (not the usual x2 OR-IS-NULL pair) --
+-- COALESCE means "NULL = use the default (speeding)", not this file's usual
+-- "NULL = don't filter at all" -- there's no "all event types at once" mode here,
+-- same as Q32's Status default below. Say if that's wanted too.
+SELECT dr.DriverID, dr.FullName, COUNT(*) AS EventCount
 FROM SafetyEvent se
 JOIN Driver dr ON dr.DriverID = se.DriverID
 JOIN EventType et ON et.EventTypeID = se.EventTypeID
-WHERE et.EventType = 'Excessive speeding'
+WHERE et.EventType = COALESCE(?, 'Excessive speeding')
 GROUP BY dr.DriverID, dr.FullName
-ORDER BY SpeedingEventCount DESC;
-
-
--- Q11: Vehicles associated with severe incidents -- "Vehicles associated with severe incidents"
--- WOULD BE NICE TO HAVE: sort by event type
-SELECT v.VIN, v.Model, v.Manufacturer, sev.SeverityLevel, COUNT(*) AS EventCount
-FROM SafetyEvent se
-JOIN Vehicle v ON v.VIN = se.VIN
-JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
-WHERE sev.SeverityLevel IN ('High', 'Critical')
-GROUP BY v.VIN, v.Model, v.Manufacturer, sev.SeverityLevel
 ORDER BY EventCount DESC;
 
 
--- Q12: Drivers with expired certifications -- "Drivers with expired certifications"
--- TODO: search by driver?
+-- Q11: Vehicles associated with severe incidents -- "Vehicles associated
+-- with severe incidents". EventType added as a breakdown dimension, plus
+-- optional VIN / SeverityID / EventTypeID drill-down filters.
+SELECT v.VIN, v.Model, v.Manufacturer, et.EventType, sev.SeverityLevel, COUNT(*) AS EventCount
+FROM SafetyEvent se
+JOIN Vehicle v ON v.VIN = se.VIN
+JOIN EventType et ON et.EventTypeID = se.EventTypeID
+JOIN EventSeverity sev ON sev.SeverityID = se.SeverityID
+WHERE sev.SeverityLevel IN ('High', 'Critical')
+  AND (se.VIN = ? OR ? IS NULL)
+  AND (se.SeverityID = ? OR ? IS NULL)
+  AND (se.EventTypeID = ? OR ? IS NULL)
+GROUP BY v.VIN, v.Model, v.Manufacturer, et.EventType, sev.SeverityLevel
+ORDER BY EventCount DESC;
+
+
+-- Q12: Drivers with expired certifications -- "Drivers with expired
+-- certifications". Optional DriverID filter.
 SELECT dr.DriverID, dr.FullName, dct.DriverCertificationType, dc.ExpiryDate, dc.Status
 FROM DriverCertification dc
 JOIN Driver dr ON dr.DriverID = dc.DriverID
 JOIN DriverCertificationType dct ON dct.DriverCertificationTypeID = dc.DriverCertificationTypeID
-WHERE dc.Status = 'Expired'
-   OR (dc.Status IN ('Active', 'Reinstated') AND dc.ExpiryDate < CURDATE())
+WHERE (dc.Status = 'Expired'
+       OR (dc.Status IN ('Active', 'Reinstated') AND dc.ExpiryDate < CURDATE()))
+  AND (dr.DriverID = ? OR ? IS NULL)
 ORDER BY dc.ExpiryDate DESC;
 
 
@@ -261,8 +309,10 @@ ORDER BY OpenJobs DESC;
 
 
 -- Q17: Eligible mechanics for a given activity type -- "Allocate mechanics to jobs" (param: ActivityTypeID)
--- Mirrors the TRG_MechanicWorkSession_BeforeInsert gate, but as a lookup BEFORE the session exists.
--- NOTE: Nice to enforce both on the app layer and the database layer
+-- Mirrors the TRG_MechanicWorkSession_BeforeInsert gate, but as a lookup BEFORE the
+-- session exists -- intentional defense-in-depth, same "root-cause fix + backstop"
+-- pattern as TRG_MaintenanceJob_BeforeInsert: this steers staff toward eligible
+-- mechanics up front, the trigger is what actually guarantees it either way.
 SELECT m.MechanicID, m.FullName, m.WorkshopID, mc.ExpiryDate
 FROM Mechanic m
 JOIN MechanicCertification mc ON mc.MechanicID = m.MechanicID
@@ -286,35 +336,27 @@ JOIN MaintenanceJob mj ON mj.JobID = ma.JobID
 ORDER BY mj.JobID, ma.ActivityID;
 
 
--- Q19: Supplier performance -- "Monitor supplier performance"
--- NOTE / SCHEMA GAP: ActivityPart records which PART was used, not which SUPPLIER
--- fulfilled that specific unit -- there's no FK path from WarrantyClaim to Supplier.
--- SupplierWarrantyClaims below is therefore an INFERENCE: it counts Parts-Supplier
--- claims on parts where this supplier is the PRIMARY supplier, assuming primary is
--- who normally fulfils the order. Flag as an estimate, not a hard fact, in any UI.
--- NOTE: May need extra checking in the schema.sql
--- SUGGESTION: a proper PartReceipt/lot table (PartNumber, SupplierID, QuantityReceived, DateReceived, ...), with ActivityPart referencing a specific receipt/lot instead of just a bare SupplierID.
--- SUGGESTION: I'm now wondering how people are supposed to know what parts from what supplier from what order are they from if the table just shows the whole stock, like a does a mechanic have to find the parts, look it up as to where it's from (possibly another table), and then log it?
-SELECT
-    s.SupplierID, s.SupplierName, s.DeliveryLeadTime,
-    COUNT(DISTINCT ps.PartNumber) AS PartsSupplied,
-    SUM(CASE WHEN ps.IsPrimary THEN 1 ELSE 0 END) AS PrimaryPartCount,
-    COUNT(DISTINCT wc.ClaimID) AS SupplierWarrantyClaims_Estimated
-FROM Supplier s
-LEFT JOIN PartSupplier ps ON ps.SupplierID = s.SupplierID
-LEFT JOIN ActivityPart ap ON ap.PartNumber = ps.PartNumber AND ps.IsPrimary = TRUE
-LEFT JOIN WarrantyClaim wc ON wc.ClaimID = ap.ClaimID AND wc.ClaimSource = 'Parts Supplier'
-GROUP BY s.SupplierID, s.SupplierName, s.DeliveryLeadTime
-ORDER BY SupplierWarrantyClaims_Estimated DESC;
+-- Q19: (removed) -- "Monitor supplier performance", scoped to price competitiveness,
+-- is fully covered by Q29 below using the original schema alone (PartSupplier's
+-- current price per supplier per part). An earlier version of this query used a
+-- separate PartReceipt table for historical price-paid trends; that table was built,
+-- tested, and rolled back as unnecessary -- see CHANGELOG_part_receipt.md.
 
 
--- Q20: Vehicle downtime review -- "Review vehicle downtime"
--- TODO: For vehicles still under maintenance, maybe we can calculate the downtime using CURDATE()?
+-- Q20: Vehicle downtime review -- "Review vehicle downtime". Recorded Downtime
+-- (a job-level fact per the brief, not simply DateClosed - DateOpened) is shown
+-- separately from a live elapsed-time ESTIMATE for still-open jobs, since a job
+-- that hasn't closed yet may not have its final Downtime figure entered. Both are
+-- surfaced rather than one replacing the other, plus a combined total for sorting.
+-- Downtime is in hours.
 SELECT
     v.VIN, v.Model, v.Manufacturer, d.DepotName,
     COUNT(mj.JobID) AS JobCount,
-    SUM(mj.Downtime) AS TotalDowntimeHours,
-    ROUND(AVG(mj.Downtime), 2) AS AvgDowntimeHoursPerJob
+    SUM(CASE WHEN mj.DateClosed IS NOT NULL THEN mj.Downtime ELSE 0 END) AS RecordedDowntimeHours,
+    SUM(CASE WHEN mj.DateClosed IS NULL
+             THEN TIMESTAMPDIFF(HOUR, mj.DateOpened, NOW()) ELSE 0 END) AS InProgressEstimateHours,
+    SUM(CASE WHEN mj.DateClosed IS NOT NULL
+             THEN mj.Downtime ELSE TIMESTAMPDIFF(HOUR, mj.DateOpened, NOW()) END) AS TotalDowntimeHours
 FROM MaintenanceJob mj
 JOIN Vehicle v ON v.VIN = mj.VIN
 JOIN Depot d ON d.DepotID = v.DepotID
@@ -323,11 +365,11 @@ ORDER BY TotalDowntimeHours DESC;
 
 
 -- Q21: Maintenance cost comparison by Manufacturer + Model -- "Compare maintenance costs
--- between vehicle models". Manufacturer here = the factory/plant (per clarification), not
--- the marketed brand, so grouping by Manufacturer+Model doubles as a plant-quality audit:
--- a factory whose vehicles consistently cost more to maintain is a real signal, distinct
--- from a model-only view where the same model built at different plants gets blended.
--- TODO: sort by model/manufacturer
+-- between vehicle models". Manufacturer here = the factory/plant, not the marketed
+-- brand, so grouping by Manufacturer+Model doubles as a plant-quality audit: a factory
+-- whose vehicles consistently cost more to maintain is a real signal, distinct from a
+-- model-only view where the same model built at different plants gets blended. Optional
+-- Manufacturer / Model filters for drilling into one plant or one model specifically.
 SELECT
     v.Manufacturer, v.Model,
     COUNT(DISTINCT v.VIN) AS FleetCount,
@@ -338,6 +380,8 @@ SELECT
 FROM Vehicle v
 JOIN MaintenanceJob mj ON mj.VIN = v.VIN
 WHERE mj.TotalCost IS NOT NULL
+  AND (v.Manufacturer = ? OR ? IS NULL)
+  AND (v.Model = ? OR ? IS NULL)
 GROUP BY v.Manufacturer, v.Model
 ORDER BY AvgCostPerVehicle DESC;
 
@@ -411,8 +455,8 @@ ORDER BY mj.DateOpened DESC, ma.ActivityID;
 -- SECTION C: EXTENSION-SCOPE QUERIES
 -- ==========================================
 
--- Q28: Warranty claim tracking -- "Warranty claims linked to specific parts"
--- TODO: sort by claim source
+-- Q28: Warranty claim tracking -- "Warranty claims linked to specific parts".
+-- Optional ClaimSource filter.
 SELECT
     wc.ClaimID, wc.ActivityID, mj.JobID, mj.VIN, wc.ClaimSource, wc.ClaimDate,
     wc.Status, wc.ResolutionDate,
@@ -422,75 +466,98 @@ JOIN MaintenanceActivity ma ON ma.ActivityID = wc.ActivityID
 JOIN MaintenanceJob mj ON mj.JobID = ma.JobID
 LEFT JOIN ActivityPart ap ON ap.ClaimID = wc.ClaimID
 LEFT JOIN Part p ON p.PartNumber = ap.PartNumber
+WHERE (wc.ClaimSource = ? OR ? IS NULL)
 GROUP BY wc.ClaimID, wc.ActivityID, mj.JobID, mj.VIN, wc.ClaimSource, wc.ClaimDate,
          wc.Status, wc.ResolutionDate
 ORDER BY wc.ClaimDate DESC;
 
 
--- Q29: Primary vs. backup supplier pricing comparison -- "Supplier management"
--- One row per (part, backup supplier) pairing; a part can have several backups so the
--- primary columns repeat across those rows -- expected, not a duplication bug.
--- TODO: Maybe seperate the 2 into by IsPrimary?
--- TODO: search by part
-SELECT
-    p.PartNumber, p.PartName,
-    sp.SupplierID AS PrimarySupplierID, sup.SupplierName AS PrimarySupplierName, sp.UnitCost AS PrimaryUnitCost,
-    sb.SupplierID AS BackupSupplierID, subp.SupplierName AS BackupSupplierName, sb.UnitCost AS BackupUnitCost
-FROM Part p
-LEFT JOIN PartSupplier sp ON sp.PartNumber = p.PartNumber AND sp.IsPrimary = TRUE
-LEFT JOIN Supplier sup ON sup.SupplierID = sp.SupplierID
-LEFT JOIN PartSupplier sb ON sb.PartNumber = p.PartNumber AND sb.IsPrimary = FALSE
-LEFT JOIN Supplier subp ON subp.SupplierID = sb.SupplierID
-ORDER BY p.PartName;
+-- Q29: Supplier list per part, primary and backup together as a flat list --
+-- "Supplier management" AND "Monitor supplier performance" (price competitiveness --
+-- see Q19's note above and CHANGELOG_part_receipt.md). Replaces an earlier pivoted
+-- primary-vs-backup layout that broke down once a part had 2+ backups (the primary
+-- columns just repeated across rows). Flat is simpler, sorts cleanly by price, and
+-- makes "search by part" trivial. Optional PartNumber / IsPrimary filters.
+--
+-- ON PrimaryPartNumber: PartSupplier.PrimaryPartNumber (schema.sql) is a generated
+-- column that exists only so UC_PS_OnePrimaryPerPart can enforce "at most one
+-- primary supplier per part" (NULL when IsPrimary=FALSE, since MySQL's UNIQUE
+-- allows unlimited NULLs). It CAN be queried -- `WHERE PrimaryPartNumber = ?` is
+-- equivalent to `WHERE PartNumber = ? AND IsPrimary = TRUE`, same unique index --
+-- but it only ever answers "give me the primary row for part X"; it can't isolate
+-- "just the backups" the way a plain IsPrimary filter can. Filtering directly on
+-- IsPrimary below instead, since one filter then covers both cases.
+SELECT p.PartNumber, p.PartName, s.SupplierID, s.SupplierName, s.DeliveryLeadTime, ps.IsPrimary, ps.UnitCost
+FROM PartSupplier ps
+JOIN Part p ON p.PartNumber = ps.PartNumber
+JOIN Supplier s ON s.SupplierID = ps.SupplierID
+WHERE (p.PartNumber = ? OR ? IS NULL)
+  AND (ps.IsPrimary = ? OR ? IS NULL)
+ORDER BY p.PartName, ps.IsPrimary DESC, ps.UnitCost ASC;
 
 
 -- Q30: Mechanic certification renewal history, full history not just current -- "the full
 -- renewal history retained so past job assignments can be verified against qualifications
--- held at the time" (param: MechanicID)
--- NOTE: partly coverved by Q13b
+-- held at the time". Related to, but not redundant with, Q13b: this is "show me
+-- everything about this mechanic's certs", Q13b is "which already-logged work sessions
+-- does a Voided cert retroactively break" -- different grain, both earn their keep.
+-- Optional Status filter (params: MechanicID, Status).
 SELECT m.MechanicID, m.FullName, mct.MechanicCertificationType,
        mc.IssueDate, mc.ExpiryDate, mc.Status, mc.RevocationDate
 FROM MechanicCertification mc
 JOIN Mechanic m ON m.MechanicID = mc.MechanicID
 JOIN MechanicCertificationType mct ON mct.MechanicCertificationTypeID = mc.MechanicCertificationTypeID
 WHERE m.MechanicID = ?
+  AND (mc.Status = ? OR ? IS NULL)
 ORDER BY mct.MechanicCertificationType, mc.IssueDate;
 
 
--- Q31: Labour hours per mechanic per activity -- "Labour hours per mechanic". Not a stored
--- column: MechanicWorkSession supports multiple sessions per activity (shifts/breaks) per
--- the schema comment, so this SUM is the only correct source of truth.
--- TODO: search by mechanic
--- TODO: would be great if managers could sort by their depot or location
+-- Q31: Labour hours per mechanic per activity -- "Labour hours per mechanic". Not a
+-- stored column: MechanicWorkSession supports multiple sessions per activity
+-- (shifts/breaks) per the schema comment, so this SUM is the only correct source of
+-- truth. Optional MechanicID filter, and optional DepotID filter/breakdown -- reached
+-- via Mechanic -> Workshop -> Depot, since Mechanic itself only has WorkshopID.
 SELECT
-    mws.MechanicID, m.FullName, mws.ActivityID, at.ActivityType,
+    mws.MechanicID, m.FullName, dep.DepotID, dep.DepotName, mws.ActivityID, at.ActivityType,
     ROUND(SUM(TIMESTAMPDIFF(MINUTE, mws.StartTime, IFNULL(mws.EndTime, NOW()))) / 60.0, 2) AS TotalLabourHours,
     COUNT(*) AS SessionCount
 FROM MechanicWorkSession mws
 JOIN Mechanic m ON m.MechanicID = mws.MechanicID
+JOIN Workshop w ON w.WorkshopID = m.WorkshopID
+JOIN Depot dep ON dep.DepotID = w.DepotID
 JOIN MaintenanceActivity ma ON ma.ActivityID = mws.ActivityID
 JOIN ActivityType at ON at.ActivityTypeID = ma.ActivityTypeID
-GROUP BY mws.MechanicID, m.FullName, mws.ActivityID, at.ActivityType
-ORDER BY mws.ActivityID, mws.MechanicID;
+WHERE (mws.MechanicID = ? OR ? IS NULL)
+  AND (dep.DepotID = ? OR ? IS NULL)
+GROUP BY mws.MechanicID, m.FullName, dep.DepotID, dep.DepotName, mws.ActivityID, at.ActivityType
+ORDER BY dep.DepotName, mws.ActivityID, mws.MechanicID;
 
 
 -- ==========================================
 -- SECTION D: GENERAL FLEET OVERVIEW
 -- ==========================================
 
--- Q32: Vehicle availability by depot/status -- "Managers have reported difficulty tracking
--- vehicle availability"
--- TODO: sort by depot and "availible" vehicles.
+-- Q32: Vehicle availability by depot -- "Managers have reported difficulty tracking
+-- vehicle availability". One row per depot per status (reverted from an earlier
+-- pivoted dashboard layout with a column per status). Optional DepotID / Status
+-- filters; Status defaults to 'Available' when not supplied, since "how many
+-- vehicles are free right now" is the actual recurring question -- pass an
+-- explicit Status to see any other one. Same COALESCE-default convention as Q10
+-- above (NULL = "use the default", not "no filter") -- there's currently no way
+-- to get every status back unfiltered in one call. Say if that's wanted too.
 SELECT d.DepotName, vs.VehicleStatus, COUNT(*) AS VehicleCount
 FROM Vehicle v
 JOIN Depot d ON d.DepotID = v.DepotID
 JOIN VehicleStatus vs ON vs.VehicleStatusID = v.OperationalStatus
+WHERE (d.DepotID = ? OR ? IS NULL)
+  AND vs.VehicleStatus = COALESCE(?, 'Available')
 GROUP BY d.DepotName, vs.VehicleStatus
 ORDER BY d.DepotName, vs.VehicleStatus;
 
 
--- Q33: Currently active driver assignments -- "...driver assignments"
--- TODO: maybe also sort by depot.
+-- Q33: Currently active driver assignments -- "...driver assignments". Already
+-- depot-first in sort order; added an optional DepotID filter on top so a
+-- depot manager can scope the view to just their own depot.
 SELECT
     va.AssignmentID, va.DriverID, dr.FullName, va.VIN, v.Model, d.DepotName,
     va.IssueDate, va.StartDate, va.AssignmentStatus
@@ -499,4 +566,5 @@ JOIN Driver dr ON dr.DriverID = va.DriverID
 JOIN Vehicle v ON v.VIN = va.VIN
 JOIN Depot d ON d.DepotID = va.DepotID
 WHERE va.AssignmentStatus = 'In Operation'
+  AND (d.DepotID = ? OR ? IS NULL)
 ORDER BY d.DepotName, dr.FullName;
