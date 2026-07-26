@@ -507,6 +507,7 @@ INSERT INTO Role (RoleName) VALUES
 -- 7B. Database Users & Privileges (DBMS Level Security)
 -- ==========================================
 
+-- NOTE: MAKE SURE YOUR DATABASE NAME IS CORRECT IN THE GRANT STATEMENTS BELOW. REPLACE 'SmartFleet' WITH YOUR ACTUAL DATABASE NAME IF DIFFERENT.
 -- 1. ADMIN (Full system access, manages DB structure and all data)
 CREATE IF NOT EXISTS USER 'admin_db'@'localhost' IDENTIFIED BY 'AdminSecurePass!';
 GRANT ALL PRIVILEGES ON SmartFleet.* TO 'admin_db'@'localhost' WITH GRANT OPTION;

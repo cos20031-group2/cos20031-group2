@@ -18,7 +18,7 @@
 - [X] Finish `6_business_queries.sql` (the use cases)
 Comment: Finnished, needs checking and add indexes.
 - [ ] Views / transactions needed for the CRUD dashboards
-- [ ] Add `Role` + `User` tables for login/dashboard access — **please decide FK pattern below before touching this**
+- [X] Add `Role` + `User` tables for login/dashboard access — **please decide FK pattern below before touching this**
 - [ ] Indexes, once queries are final (ie., 6_business_queries.sql): identify candidate columns from actual query patterns → run `EXPLAIN` + timing before/after on the seed dataset → document a retain/discard decision per index with the measured time improvement
 
 ### `Role` / `User` design (Done! Now in schema.sql as section 7)
