@@ -503,74 +503,75 @@ INSERT INTO Role (RoleName) VALUES
 ('Workshop Manager'), -- Focus: Maintenance, Mechanics, Parts
 ('Admin');            -- Focus: System-wide access, user management
 
--- ==========================================
--- 7B. Database Users & Privileges (DBMS Level Security)
--- ==========================================
+-- -- The Section &B is commented out because it is intended for DBMS-level user management, which is typically handled outside of the application schema. If you want to implement these users and privileges, you can uncomment and execute the following SQL statements in your MySQL environment. Make sure to replace 'SmartFleet' with your actual database name if different.
+-- -- ==========================================
+-- -- 7B. Database Users & Privileges (DBMS Level Security)
+-- -- ==========================================
 
--- NOTE: MAKE SURE YOUR DATABASE NAME IS CORRECT IN THE GRANT STATEMENTS BELOW. REPLACE 'SmartFleet' WITH YOUR ACTUAL DATABASE NAME IF DIFFERENT.
--- 1. ADMIN (Full system access, manages DB structure and all data)
-CREATE IF NOT EXISTS USER 'admin_db'@'localhost' IDENTIFIED BY 'AdminSecurePass!';
-GRANT ALL PRIVILEGES ON SmartFleet.* TO 'admin_db'@'localhost' WITH GRANT OPTION;
+-- -- NOTE: MAKE SURE YOUR DATABASE NAME IS CORRECT IN THE GRANT STATEMENTS BELOW. REPLACE 'SmartFleet' WITH YOUR ACTUAL DATABASE NAME IF DIFFERENT.
+-- -- 1. ADMIN (Full system access, manages DB structure and all data)
+-- CREATE USER IF NOT EXISTS 'admin_db'@'localhost' IDENTIFIED BY 'AdminSecurePass!';
+-- GRANT ALL PRIVILEGES ON SmartFleet.* TO 'admin_db'@'localhost' WITH GRANT OPTION;
 
--- 2. FLEET MANAGER (Operational access: Vehicles, Drivers, Depots, Safety)
-CREATE IF NOT EXISTS USER 'fleet_manager_db'@'localhost' IDENTIFIED BY 'FleetSecurePass!';
--- Fleet & Driver Management
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Vehicle TO 'fleet_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Driver TO 'fleet_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.VehicleAssignment TO 'fleet_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.DriverCertification TO 'fleet_manager_db'@'localhost';
--- Safety & Events Management
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.SafetyEvent TO 'fleet_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.EventReview TO 'fleet_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.CoachingRecord TO 'fleet_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'fleet_manager_db'@'localhost';
--- Read-only access to reference tables needed for the dashboard
-GRANT SELECT ON SmartFleet.Depot TO 'fleet_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.VehicleCategory TO 'fleet_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.VehicleStatus TO 'fleet_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.EventType TO 'fleet_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.EventSeverity TO 'fleet_manager_db'@'localhost';
--- EXPLICITLY DENY access to workshop/maintenance tables (Least Privilege)
--- (By not granting them, they are denied by default)
+-- -- 2. FLEET MANAGER (Operational access: Vehicles, Drivers, Depots, Safety)
+-- CREATE USER IF NOT EXISTS 'fleet_manager_db'@'localhost' IDENTIFIED BY 'FleetSecurePass!';
+-- -- Fleet & Driver Management
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Vehicle TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Driver TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.VehicleAssignment TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.DriverCertification TO 'fleet_manager_db'@'localhost';
+-- -- Safety & Events Management
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.SafetyEvent TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.EventReview TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.CoachingRecord TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'fleet_manager_db'@'localhost';
+-- -- Read-only access to reference tables needed for the dashboard
+-- GRANT SELECT ON SmartFleet.Depot TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.VehicleCategory TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.VehicleStatus TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.EventType TO 'fleet_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.EventSeverity TO 'fleet_manager_db'@'localhost';
+-- -- EXPLICITLY DENY access to workshop/maintenance tables (Least Privilege)
+-- -- (By not granting them, they are denied by default)
 
--- 3. WORKSHOP MANAGER (Operational access: Maintenance, Mechanics, Parts)
-CREATE IF NOT EXISTS USER 'workshop_manager_db'@'localhost' IDENTIFIED BY 'WorkshopSecurePass!';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceJob TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceActivity TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MechanicWorkSession TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Mechanic TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MechanicCertification TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Part TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Supplier TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.ActivityPart TO 'workshop_manager_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.WarrantyClaim TO 'workshop_manager_db'@'localhost';
--- Read-only access to vehicles (to see what needs fixing)
-GRANT SELECT ON SmartFleet.Vehicle TO 'workshop_manager_db'@'localhost';
-GRANT SELECT ON SmartFleet.PredictiveAlert TO 'workshop_manager_db'@'localhost';
+-- -- 3. WORKSHOP MANAGER (Operational access: Maintenance, Mechanics, Parts)
+-- CREATE USER IF NOT EXISTS 'workshop_manager_db'@'localhost' IDENTIFIED BY 'WorkshopSecurePass!';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceJob TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MaintenanceActivity TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MechanicWorkSession TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Mechanic TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.MechanicCertification TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Part TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.Supplier TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.ActivityPart TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON SmartFleet.WarrantyClaim TO 'workshop_manager_db'@'localhost';
+-- -- Read-only access to vehicles (to see what needs fixing)
+-- GRANT SELECT ON SmartFleet.Vehicle TO 'workshop_manager_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.PredictiveAlert TO 'workshop_manager_db'@'localhost';
 
--- 4. SAFETY STAFF (Read/Review access to safety events)
-CREATE IF NOT EXISTS USER 'safety_staff_db'@'localhost' IDENTIFIED BY 'SafetySecurePass!';
-GRANT SELECT, UPDATE ON SmartFleet.SafetyEvent TO 'safety_staff_db'@'localhost';
-GRANT SELECT, INSERT, UPDATE ON SmartFleet.EventReview TO 'safety_staff_db'@'localhost';
-GRANT SELECT ON SmartFleet.Driver TO 'safety_staff_db'@'localhost';
-GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'safety_staff_db'@'localhost';
-GRANT SELECT ON SmartFleet.CoachingRecord TO 'safety_staff_db'@'localhost';
+-- -- 4. SAFETY STAFF (Read/Review access to safety events)
+-- CREATE USER IF NOT EXISTS 'safety_staff_db'@'localhost' IDENTIFIED BY 'SafetySecurePass!';
+-- GRANT SELECT, UPDATE ON SmartFleet.SafetyEvent TO 'safety_staff_db'@'localhost';
+-- GRANT SELECT, INSERT, UPDATE ON SmartFleet.EventReview TO 'safety_staff_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.Driver TO 'safety_staff_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'safety_staff_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.CoachingRecord TO 'safety_staff_db'@'localhost';
 
--- 5. DRIVER (Read-only access to their own data)
-CREATE IF NOT EXISTS USER 'driver_db'@'localhost' IDENTIFIED BY 'DriverSecurePass!';
-GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'driver_db'@'localhost';
-GRANT SELECT ON SmartFleet.VehicleAssignment TO 'driver_db'@'localhost';
-GRANT SELECT ON SmartFleet.SafetyEvent TO 'driver_db'@'localhost';
-GRANT SELECT ON SmartFleet.DriverCertification TO 'driver_db'@'localhost';
+-- -- 5. DRIVER (Read-only access to their own data)
+-- CREATE USER IF NOT EXISTS 'driver_db'@'localhost' IDENTIFIED BY 'DriverSecurePass!';
+-- GRANT SELECT ON SmartFleet.DriverMonthlySafetyScore TO 'driver_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.VehicleAssignment TO 'driver_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.SafetyEvent TO 'driver_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.DriverCertification TO 'driver_db'@'localhost';
 
--- 6. MECHANIC (Read-only for jobs, update their own work sessions)
-CREATE IF NOT EXISTS USER 'mechanic_db'@'localhost' IDENTIFIED BY 'MechanicSecurePass!';
-GRANT SELECT ON SmartFleet.MaintenanceJob TO 'mechanic_db'@'localhost';
-GRANT SELECT ON SmartFleet.MaintenanceActivity TO 'mechanic_db'@'localhost';
-GRANT INSERT, UPDATE ON SmartFleet.MechanicWorkSession TO 'mechanic_db'@'localhost';
+-- -- 6. MECHANIC (Read-only for jobs, update their own work sessions)
+-- CREATE USER IF NOT EXISTS 'mechanic_db'@'localhost' IDENTIFIED BY 'MechanicSecurePass!';
+-- GRANT SELECT ON SmartFleet.MaintenanceJob TO 'mechanic_db'@'localhost';
+-- GRANT SELECT ON SmartFleet.MaintenanceActivity TO 'mechanic_db'@'localhost';
+-- GRANT INSERT, UPDATE ON SmartFleet.MechanicWorkSession TO 'mechanic_db'@'localhost';
 
--- Apply changes
-FLUSH PRIVILEGES;
+-- -- Apply changes
+-- FLUSH PRIVILEGES;
 
 -- ==========================================
 -- SEED DATA: Lookup & Reference Tables
