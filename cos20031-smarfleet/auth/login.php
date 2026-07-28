@@ -2,9 +2,22 @@
 session_start();
 require_once __DIR__ . '/../config/db.php';
 
+// Maps each RoleName to its dashboard folder.
+function dashboardPathForRole(string $roleName): string
+{
+    $map = [
+        'Driver'           => '../dashboards/driver/index.php',
+        'Mechanic'         => '../dashboards/mechanic/index.php',
+        'Safety Staff'     => '../dashboards/safety_staff/index.php',
+        'Fleet Manager'    => '../dashboards/fleet_manager/index.php',
+        'Workshop Manager' => '../dashboards/workshop_manager/index.php',
+    ];
+    return $map[$roleName] ?? '../welcome.php'; // fallback (e.g. Admin) -- no dashboard built for it yet
+}
+
 // If already logged in, don't show the form again -- just go to the landing page.
 if (isset($_SESSION['user_id'])) {
-    header('Location: ../welcome.php');
+    header('Location: ' . dashboardPathForRole($_SESSION['role_name']));
     exit;
 }
 
@@ -46,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['mechanic_id']    = $user['MechanicID'];
                 $_SESSION['review_staff_id']= $user['ReviewStaffID'];
 
-                header('Location: ../welcome.php');
+                header('Location: ' . dashboardPathForRole($user['RoleName']));
                 exit;
             }
         }
