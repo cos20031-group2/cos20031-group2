@@ -6,11 +6,11 @@ require_once __DIR__ . '/../config/db.php';
 function dashboardPathForRole(string $roleName): string
 {
     $map = [
-        'Driver'           => '../dashboards/driver/index.php',
-        'Mechanic'         => '../dashboards/mechanic/index.php',
-        'Safety Staff'     => '../dashboards/safety_staff/index.php',
-        'Fleet Manager'    => '../dashboards/fleet_manager/index.php',
-        'Workshop Manager' => '../dashboards/workshop_manager/index.php',
+        'Driver'           => '../dashboards/driver/driver_index.php',
+        'Mechanic'         => '../dashboards/mechanic/mechanic_index.php',
+        'Safety Staff'     => '../dashboards/safety_staff/safety_staff_index.php',
+        'Fleet Manager'    => '../dashboards/fleet_manager/fleet_manager_index.php',
+        'Workshop Manager' => '../dashboards/workshop_manager/workshop_manager_index.php',
     ];
     return $map[$roleName] ?? '../welcome.php'; // fallback (e.g. Admin) -- no dashboard built for it yet
 }
