@@ -294,8 +294,7 @@ DELIMITER ;
 -- them that month has no row to decrement.
 --
 -- Only 'Terminated' is excluded. Drivers with no CurrentDepotID are skipped
--- entirely (DepotID is NOT NULL on this table) -- worth revisiting if that
--- turns out to be a real scenario rather than an edge case.
+-- entirely (DepotID is NOT NULL on this table).
 
 DELIMITER //
 
