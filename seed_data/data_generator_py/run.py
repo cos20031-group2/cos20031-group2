@@ -75,7 +75,7 @@ print("Stage 09 written.")
 print("Reviews:", review_state["review_count"], "Closed:", review_state["closed_review_count"])
 print("CoachingRecords:", review_state["coaching_record_count"])
 
-sql10, appuser_state = stage_10_app_users.generate(rng, core_state, ref_state)
+sql10, appuser_state = stage_10_app_users.generate(core_state, ref_state)
 sql10.write(os.path.join(OUT_DIR, "10_app_users.sql"))
 print("Stage 10 written.")
 print("AppUsers:", appuser_state["app_user_count"])
