@@ -680,4 +680,4 @@ INSERT INTO PenaltyRule (RuleType, RuleDescription, EventTypeID, SeverityID, Min
 
 -- Edge case penalties can be added as needed, for example:
 -- ('Base', 'Base penalty for Excessive speeding events', 3, NULL, 1, 1, 1.0),
--- ('Conditional', 'Conditional penalty for more than 3 Medium severity events within 2 month', NULL, 2, 3, 2, 10.0)
+-- ('Conditional', 'Conditional penalty for more than 3 Medium severity events within 1 month', NULL, 2, 3, 1, 10.0)
