@@ -36,7 +36,7 @@ _DEV_PASSWORD = "1234"
 _PASSWORD_HASH = "sha256:" + hashlib.sha256(_DEV_PASSWORD.encode()).hexdigest()
 
 
-def generate(rng, core_state, ref_state):
+def generate(core_state, ref_state):
     sql = SqlFile(
         "10 - APPLICATION USERS (schema.sql section 7A)",
         "AppUser -- one login per Driver/Mechanic/SafetyStaff, plus a "
