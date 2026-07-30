@@ -73,6 +73,6 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 
 
 NOTE: user_id in user table is redundant if we can just use username as pk
-
+ANSWER: Checked. You're right that UserID isn't referenced as a FK anywhere else in the schema, so it's not breaking anything today. My only hesitation: usernames are usually a bad PK choice long-term since people sometimes want to change them, and a surrogate ID never has that problem. But given nothing depends on it here and Username's already UNIQUE, I think your simplification is fine for this project. Your call, if you drop it, just give me a heads up. Personally, let's just keep as it is simply because... it works :smile:
 ---
 
