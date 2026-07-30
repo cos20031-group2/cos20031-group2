@@ -70,7 +70,9 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 - [ ] Each dashboard pulls from its relevant slice of `6_business_queries.sql`
 - [ ] Auth/login wired to `User` / `Role`
 
-NOTE: Or we can set aside the auth/login and work on making the website function first, but it's recommended that we do the security part first.
+
+
+NOTE: user_id in user table is redundant if we can just use username as pk
 
 ---
 
