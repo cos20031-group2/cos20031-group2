@@ -3,13 +3,12 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
-// Q13a: vehicle assignments now illegal due to a Voided driver certification --
-// "Drivers operating outside their authorised vehicle categories"
-$results = $pdo->query(
-    "SELECT va.AssignmentID, va.VIN, va.DriverID, dr.FullName, va.StartDate, va.AssignmentStatus,
-            dct.DriverCertificationType, dc.DriverCertificationID, dc.IssueDate, dc.ExpiryDate, dc.StatusNotes
-     FROM vehicleassignment va
+$perPage = 10;
+$page = currentPage('page');
+
+$baseQuery = "FROM vehicleassignment va
      JOIN vehicle v ON v.VIN = va.VIN
      JOIN vehiclecertificationrequirement vcr ON vcr.VehicleCategoryID = v.CategoryID
      JOIN drivercertification dc
@@ -20,8 +19,19 @@ $results = $pdo->query(
      WHERE va.StartDate IS NOT NULL
        AND dc.Status = 'Voided'
        AND dc.IssueDate <= va.StartDate
-       AND dc.ExpiryDate >= va.StartDate
-     ORDER BY va.StartDate"
+       AND dc.ExpiryDate >= va.StartDate";
+
+$totalRows = (int)$pdo->query("SELECT COUNT(*) $baseQuery")->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
+$results = $pdo->query(
+    "SELECT va.AssignmentID, va.VIN, va.DriverID, dr.FullName, va.StartDate, va.AssignmentStatus,
+            dct.DriverCertificationType, dc.DriverCertificationID, dc.IssueDate, dc.ExpiryDate, dc.StatusNotes
+     $baseQuery
+     ORDER BY va.StartDate
+     LIMIT $perPage OFFSET $offset"
 )->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -58,6 +68,7 @@ $results = $pdo->query(
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($page, $totalPages, 'page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

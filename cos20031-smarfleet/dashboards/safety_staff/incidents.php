@@ -3,12 +3,12 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $myStaffId = $_SESSION['review_staff_id'];
 $message = '';
 $error = '';
 
-// Review actions -- create a review on first engagement, then progress it.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (isset($_POST['start_review'])) {
@@ -42,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Filter inputs
 $driverId   = $_GET['driver_id'] ?? '';
 $vin        = $_GET['vin'] ?? '';
 $depotId    = $_GET['depot_id'] ?? '';
@@ -52,13 +51,36 @@ $reviewState = $_GET['review_state'] ?? '';
 $dateFrom   = $_GET['date_from'] ?? '';
 $dateTo     = $_GET['date_to'] ?? '';
 
-// Lookup lists for the filter dropdowns
 $depots = $pdo->query('SELECT DepotID, DepotName FROM depot ORDER BY DepotName')->fetchAll();
 $eventTypes = $pdo->query('SELECT EventTypeID, EventType FROM eventtype ORDER BY EventType')->fetchAll();
 $severities = $pdo->query('SELECT SeverityID, SeverityLevel FROM eventseverity ORDER BY SeverityID')->fetchAll();
 
-// Q1 + Q8 combined: full join for review info, full filter set
-$sql = 'SELECT se.EventID, se.EventTimestamp, se.VIN, v.Model, d.DepotName, se.DriverID, dr.FullName AS DriverName,
+$perPage = 10;
+$page = currentPage('page');
+
+$whereClause = 'WHERE (:driverId = \'\' OR se.DriverID = :driverId)
+          AND (:vin = \'\' OR se.VIN = :vin)
+          AND (:depotId = \'\' OR se.DepotID = :depotId)
+          AND (:eventTypeId = \'\' OR se.EventTypeID = :eventTypeId)
+          AND (:severityId = \'\' OR se.SeverityID = :severityId)
+          AND (:reviewState = \'\' OR se.ReviewState = :reviewState)
+          AND (:dateFrom = \'\' OR se.EventTimestamp >= :dateFrom)
+          AND (:dateTo = \'\' OR se.EventTimestamp <= :dateTo)';
+
+$filterParams = [
+    'driverId' => $driverId, 'vin' => $vin, 'depotId' => $depotId,
+    'eventTypeId' => $eventTypeId, 'severityId' => $severityId,
+    'reviewState' => $reviewState, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo,
+];
+
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM safetyevent se $whereClause");
+$countStmt->execute($filterParams);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
+$sql = "SELECT se.EventID, se.EventTimestamp, se.VIN, v.Model, d.DepotName, se.DriverID, dr.FullName AS DriverName,
                et.EventType, sev.SeverityLevel, se.Odometer, se.ReviewState,
                er.ReviewID, er.Status AS ReviewStatus, er.Comments, er.Recommendations, ss.FullName AS ReviewerName
         FROM safetyevent se
@@ -69,23 +91,12 @@ $sql = 'SELECT se.EventID, se.EventTimestamp, se.VIN, v.Model, d.DepotName, se.D
         JOIN eventseverity sev ON sev.SeverityID = se.SeverityID
         LEFT JOIN eventreview er ON er.EventID = se.EventID
         LEFT JOIN safetystaff ss ON ss.ReviewStaffID = er.ReviewerStaffID
-        WHERE (:driverId = \'\' OR se.DriverID = :driverId)
-          AND (:vin = \'\' OR se.VIN = :vin)
-          AND (:depotId = \'\' OR se.DepotID = :depotId)
-          AND (:eventTypeId = \'\' OR se.EventTypeID = :eventTypeId)
-          AND (:severityId = \'\' OR se.SeverityID = :severityId)
-          AND (:reviewState = \'\' OR se.ReviewState = :reviewState)
-          AND (:dateFrom = \'\' OR se.EventTimestamp >= :dateFrom)
-          AND (:dateTo = \'\' OR se.EventTimestamp <= :dateTo)
+        $whereClause
         ORDER BY se.EventTimestamp DESC
-        LIMIT 100';
+        LIMIT $perPage OFFSET $offset";
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute([
-    'driverId' => $driverId, 'vin' => $vin, 'depotId' => $depotId,
-    'eventTypeId' => $eventTypeId, 'severityId' => $severityId,
-    'reviewState' => $reviewState, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo,
-]);
+$stmt->execute($filterParams);
 $events = $stmt->fetchAll();
 
 function severityClass(string $level): string
@@ -141,6 +152,8 @@ function severityClass(string $level): string
         <a href="incidents.php">Clear</a>
     </form>
 
+    <p><?= htmlspecialchars($totalRows) ?> result(s)</p>
+
     <table>
         <tr>
             <th>Date</th><th>Driver</th><th>Vehicle</th><th>Depot</th><th>Event</th>
@@ -180,6 +193,8 @@ function severityClass(string $level): string
             </tr>
         <?php endforeach; ?>
     </table>
+
+    <?= paginationControls($page, $totalPages, 'page') ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
 </body>

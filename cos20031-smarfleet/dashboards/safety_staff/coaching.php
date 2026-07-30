@@ -3,6 +3,7 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $message = '';
 $error = '';
@@ -31,16 +32,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_outcome'])) {
 $driverId = $_GET['driver_id'] ?? '';
 $outcomeFilter = $_GET['outcome'] ?? '';
 
+$perPage = 10;
+$page = currentPage('page');
+
+$whereClause = 'WHERE (:driverId = \'\' OR cr.DriverID = :driverId)
+       AND (:outcome = \'\' OR cr.Outcome = :outcome)';
+$filterParams = ['driverId' => $driverId, 'outcome' => $outcomeFilter];
+
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM coachingrecord cr $whereClause");
+$countStmt->execute($filterParams);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT cr.CoachingRecordID, cr.DriverID, dr.FullName, cr.CoachingType,
+    "SELECT cr.CoachingRecordID, cr.DriverID, dr.FullName, cr.CoachingType,
             cr.CoachingDate, cr.CompletionDate, cr.Outcome
      FROM coachingrecord cr
      JOIN driver dr ON dr.DriverID = cr.DriverID
-     WHERE (:driverId = \'\' OR cr.DriverID = :driverId)
-       AND (:outcome = \'\' OR cr.Outcome = :outcome)
-     ORDER BY cr.CoachingDate DESC'
+     $whereClause
+     ORDER BY cr.CoachingDate DESC
+     LIMIT $perPage OFFSET $offset"
 );
-$stmt->execute(['driverId' => $driverId, 'outcome' => $outcomeFilter]);
+$stmt->execute($filterParams);
 $records = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -96,6 +111,7 @@ $records = $stmt->fetchAll();
             </tr>
         <?php endforeach; ?>
     </table>
+    <?= paginationControls($page, $totalPages, 'page') ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
 </body>

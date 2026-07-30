@@ -103,3 +103,30 @@ th {
 .score-critical {
     color: #c62828;
 }
+
+.pagination {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 14px 0;
+}
+
+.pagination a, .pagination span.current-page {
+    padding: 4px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #222;
+    background: #fff;
+}
+
+.pagination span.current-page {
+    background: #222;
+    color: #fff;
+    border-color: #222;
+}
+
+.pagination span:not(.current-page) {
+    border: none;
+    padding: 4px 2px;
+}

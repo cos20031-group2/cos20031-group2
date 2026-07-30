@@ -3,6 +3,7 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $depotId = $_GET['depot_id'] ?? '';
 $eventTypeId = $_GET['event_type_id'] ?? '';
@@ -12,20 +13,44 @@ $depots = $pdo->query('SELECT DepotID, DepotName FROM depot ORDER BY DepotName')
 $eventTypes = $pdo->query('SELECT EventTypeID, EventType FROM eventtype ORDER BY EventType')->fetchAll();
 $severities = $pdo->query('SELECT SeverityID, SeverityLevel FROM eventseverity ORDER BY SeverityID')->fetchAll();
 
+$perPage = 10;
+$page = currentPage('page');
+
+$whereClause = 'WHERE (:depotId = \'\' OR se.DepotID = :depotId)
+       AND (:eventTypeId = \'\' OR se.EventTypeID = :eventTypeId)
+       AND (:severityId = \'\' OR se.SeverityID = :severityId)';
+$filterParams = ['depotId' => $depotId, 'eventTypeId' => $eventTypeId, 'severityId' => $severityId];
+
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*) FROM (
+        SELECT d.DepotName, YEAR(se.EventTimestamp) AS Yr, MONTH(se.EventTimestamp) AS Mo, et.EventType, sev.SeverityLevel
+        FROM safetyevent se
+        JOIN depot d ON d.DepotID = se.DepotID
+        JOIN eventtype et ON et.EventTypeID = se.EventTypeID
+        JOIN eventseverity sev ON sev.SeverityID = se.SeverityID
+        $whereClause
+        GROUP BY d.DepotName, YEAR(se.EventTimestamp), MONTH(se.EventTimestamp), et.EventType, sev.SeverityLevel
+     ) AS sub"
+);
+$countStmt->execute($filterParams);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT d.DepotName, YEAR(se.EventTimestamp) AS Yr, MONTH(se.EventTimestamp) AS Mo,
+    "SELECT d.DepotName, YEAR(se.EventTimestamp) AS Yr, MONTH(se.EventTimestamp) AS Mo,
             et.EventType, sev.SeverityLevel, COUNT(*) AS EventCount
      FROM safetyevent se
      JOIN depot d ON d.DepotID = se.DepotID
      JOIN eventtype et ON et.EventTypeID = se.EventTypeID
      JOIN eventseverity sev ON sev.SeverityID = se.SeverityID
-     WHERE (:depotId = \'\' OR se.DepotID = :depotId)
-       AND (:eventTypeId = \'\' OR se.EventTypeID = :eventTypeId)
-       AND (:severityId = \'\' OR se.SeverityID = :severityId)
+     $whereClause
      GROUP BY d.DepotName, YEAR(se.EventTimestamp), MONTH(se.EventTimestamp), et.EventType, sev.SeverityLevel
-     ORDER BY d.DepotName, Yr, Mo, et.EventType, sev.SeverityLevel'
+     ORDER BY d.DepotName, Yr, Mo, et.EventType, sev.SeverityLevel
+     LIMIT $perPage OFFSET $offset"
 );
-$stmt->execute(['depotId' => $depotId, 'eventTypeId' => $eventTypeId, 'severityId' => $severityId]);
+$stmt->execute($filterParams);
 $trends = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -76,6 +101,7 @@ $trends = $stmt->fetchAll();
             </tr>
         <?php endforeach; ?>
     </table>
+    <?= paginationControls($page, $totalPages, 'page') ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
 </body>

@@ -3,13 +3,23 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
+$perPage = 10;
 $month = $_GET['month'] ?? date('n');
 $year  = $_GET['year'] ?? date('Y');
 
-// Q2a: high-risk drivers, worst score first, for the selected month
+// --- Section 1: high-risk drivers (Q2a) ---
+$riskPage = currentPage('risk_page');
+$countStmt = $pdo->prepare('SELECT COUNT(*) FROM drivermonthlysafetyscore WHERE Month = :month AND Year = :year');
+$countStmt->execute(['month' => $month, 'year' => $year]);
+$totalRisk = (int)$countStmt->fetchColumn();
+$totalRiskPages = max(1, (int)ceil($totalRisk / $perPage));
+$riskPage = min($riskPage, $totalRiskPages);
+$riskOffset = ($riskPage - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT dr.DriverID, dr.FullName, d.DepotName, dms.DriverMonthlySafetyScoreID, dms.Month, dms.Year, dms.Score,
+    "SELECT dr.DriverID, dr.FullName, d.DepotName, dms.DriverMonthlySafetyScoreID, dms.Month, dms.Year, dms.Score,
             (SELECT COUNT(*) FROM safetyevent se
              WHERE se.DriverID = dr.DriverID
                AND MONTH(se.EventTimestamp) = dms.Month
@@ -18,12 +28,13 @@ $stmt = $pdo->prepare(
      JOIN driver dr ON dr.DriverID = dms.DriverID
      JOIN depot d ON d.DepotID = dms.DepotID
      WHERE dms.Month = :month AND dms.Year = :year
-     ORDER BY dms.Score ASC'
+     ORDER BY dms.Score ASC
+     LIMIT $perPage OFFSET $riskOffset"
 );
 $stmt->execute(['month' => $month, 'year' => $year]);
 $riskDrivers = $stmt->fetchAll();
 
-// Q2b: penalty breakdown, only if a specific score row was requested
+// --- Penalty breakdown drill-down (small, unpaginated) ---
 $penalties = [];
 $expandedScoreId = $_GET['score_id'] ?? '';
 if ($expandedScoreId !== '') {
@@ -38,30 +49,59 @@ if ($expandedScoreId !== '') {
     $penalties = $stmt->fetchAll();
 }
 
-// Q10: drivers ranked by count of a chosen event type (defaults to speeding)
+// --- Section 2: drivers ranked by event type (Q10) ---
+$rankPage = currentPage('rank_page');
 $rankEventType = $_GET['rank_event_type'] ?? 'Excessive speeding';
+
+$countStmt = $pdo->prepare(
+    'SELECT COUNT(*) FROM (
+        SELECT se.DriverID FROM safetyevent se
+        JOIN eventtype et ON et.EventTypeID = se.EventTypeID
+        WHERE et.EventType = :eventType
+        GROUP BY se.DriverID
+     ) AS sub'
+);
+$countStmt->execute(['eventType' => $rankEventType]);
+$totalRank = (int)$countStmt->fetchColumn();
+$totalRankPages = max(1, (int)ceil($totalRank / $perPage));
+$rankPage = min($rankPage, $totalRankPages);
+$rankOffset = ($rankPage - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT dr.DriverID, dr.FullName, COUNT(*) AS EventCount
+    "SELECT dr.DriverID, dr.FullName, COUNT(*) AS EventCount
      FROM safetyevent se
      JOIN driver dr ON dr.DriverID = se.DriverID
      JOIN eventtype et ON et.EventTypeID = se.EventTypeID
      WHERE et.EventType = :eventType
      GROUP BY dr.DriverID, dr.FullName
      ORDER BY EventCount DESC
-     LIMIT 20'
+     LIMIT $perPage OFFSET $rankOffset"
 );
 $stmt->execute(['eventType' => $rankEventType]);
 $rankedDrivers = $stmt->fetchAll();
 
 $eventTypes = $pdo->query('SELECT EventType FROM eventtype ORDER BY EventType')->fetchAll();
 
-// Q7: drivers requiring retraining
-$retraining = $pdo->query(
+// --- Section 3: drivers requiring retraining (Q7) ---
+$retrainPage = currentPage('retrain_page');
+$totalRetrain = (int)$pdo->query(
+    "SELECT COUNT(DISTINCT DriverID) FROM coachingrecord
+     WHERE CoachingType = 'Retraining' AND Outcome <> 'Passed'"
+)->fetchColumn();
+$totalRetrainPages = max(1, (int)ceil($totalRetrain / $perPage));
+$retrainPage = min($retrainPage, $totalRetrainPages);
+$retrainOffset = ($retrainPage - 1) * $perPage;
+
+$stmt = $pdo->prepare(
     "SELECT DISTINCT cr.DriverID, dr.FullName, cr.CoachingDate, cr.Outcome
      FROM coachingrecord cr
      JOIN driver dr ON dr.DriverID = cr.DriverID
-     WHERE cr.CoachingType = 'Retraining' AND cr.Outcome <> 'Passed'"
-)->fetchAll();
+     WHERE cr.CoachingType = 'Retraining' AND cr.Outcome <> 'Passed'
+     ORDER BY cr.CoachingDate DESC
+     LIMIT $perPage OFFSET $retrainOffset"
+);
+$stmt->execute();
+$retraining = $stmt->fetchAll();
 
 function scoreClass(float $score): string
 {
@@ -96,10 +136,11 @@ function scoreClass(float $score): string
                 <td><?= htmlspecialchars($r['DepotName']) ?></td>
                 <td class="<?= scoreClass((float)$r['Score']) ?>"><?= htmlspecialchars($r['Score']) ?></td>
                 <td><?= htmlspecialchars($r['EventsThisMonth']) ?></td>
-                <td><a href="?month=<?= $month ?>&year=<?= $year ?>&score_id=<?= $r['DriverMonthlySafetyScoreID'] ?>#breakdown">View Penalties</a></td>
+                <td><a href="?month=<?= $month ?>&year=<?= $year ?>&score_id=<?= $r['DriverMonthlySafetyScoreID'] ?>&risk_page=<?= $riskPage ?>&rank_page=<?= $rankPage ?>&retrain_page=<?= $retrainPage ?>#breakdown">View Penalties</a></td>
             </tr>
         <?php endforeach; ?>
     </table>
+    <?= paginationControls($riskPage, $totalRiskPages, 'risk_page') ?>
 
     <?php if ($expandedScoreId !== ''): ?>
         <h3 id="breakdown">Penalty Breakdown</h3>
@@ -123,6 +164,8 @@ function scoreClass(float $score): string
 
     <h3>Drivers Ranked by Event Type</h3>
     <form method="GET">
+        <input type="hidden" name="month" value="<?= htmlspecialchars($month) ?>">
+        <input type="hidden" name="year" value="<?= htmlspecialchars($year) ?>">
         <select name="rank_event_type">
             <?php foreach ($eventTypes as $et): ?>
                 <option value="<?= htmlspecialchars($et['EventType']) ?>" <?= $rankEventType === $et['EventType'] ? 'selected' : '' ?>>
@@ -141,6 +184,7 @@ function scoreClass(float $score): string
             </tr>
         <?php endforeach; ?>
     </table>
+    <?= paginationControls($rankPage, $totalRankPages, 'rank_page') ?>
 
     <h3>Drivers Requiring Retraining</h3>
     <?php if (count($retraining) === 0): ?>
@@ -156,6 +200,7 @@ function scoreClass(float $score): string
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($retrainPage, $totalRetrainPages, 'retrain_page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

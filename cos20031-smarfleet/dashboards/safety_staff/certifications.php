@@ -3,8 +3,20 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Safety Staff']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
-// Q4: expiring within 30 days
+$perPage = 10;
+
+// --- Expiring within 30 days (Q4) ---
+$expiringPage = currentPage('expiring_page');
+$totalExpiring = (int)$pdo->query(
+    "SELECT COUNT(*) FROM drivercertification
+     WHERE Status IN ('Active', 'Reinstated') AND ExpiryDate <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
+)->fetchColumn();
+$totalExpiringPages = max(1, (int)ceil($totalExpiring / $perPage));
+$expiringPage = min($expiringPage, $totalExpiringPages);
+$expiringOffset = ($expiringPage - 1) * $perPage;
+
 $expiring = $pdo->query(
     "SELECT dr.DriverID, dr.FullName, dct.DriverCertificationType, dc.IssueDate, dc.ExpiryDate, dc.Status,
             DATEDIFF(dc.ExpiryDate, CURDATE()) AS DaysUntilExpiry
@@ -13,10 +25,20 @@ $expiring = $pdo->query(
      JOIN drivercertificationtype dct ON dct.DriverCertificationTypeID = dc.DriverCertificationTypeID
      WHERE dc.Status IN ('Active', 'Reinstated')
        AND dc.ExpiryDate <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-     ORDER BY dc.ExpiryDate ASC"
+     ORDER BY dc.ExpiryDate ASC
+     LIMIT $perPage OFFSET $expiringOffset"
 )->fetchAll();
 
-// Q12: already expired
+// --- Already expired (Q12) ---
+$expiredPage = currentPage('expired_page');
+$totalExpired = (int)$pdo->query(
+    "SELECT COUNT(*) FROM drivercertification
+     WHERE Status = 'Expired' OR (Status IN ('Active', 'Reinstated') AND ExpiryDate < CURDATE())"
+)->fetchColumn();
+$totalExpiredPages = max(1, (int)ceil($totalExpired / $perPage));
+$expiredPage = min($expiredPage, $totalExpiredPages);
+$expiredOffset = ($expiredPage - 1) * $perPage;
+
 $expired = $pdo->query(
     "SELECT dr.DriverID, dr.FullName, dct.DriverCertificationType, dc.ExpiryDate, dc.Status
      FROM drivercertification dc
@@ -24,7 +46,8 @@ $expired = $pdo->query(
      JOIN drivercertificationtype dct ON dct.DriverCertificationTypeID = dc.DriverCertificationTypeID
      WHERE (dc.Status = 'Expired'
             OR (dc.Status IN ('Active', 'Reinstated') AND dc.ExpiryDate < CURDATE()))
-     ORDER BY dc.ExpiryDate DESC"
+     ORDER BY dc.ExpiryDate DESC
+     LIMIT $perPage OFFSET $expiredOffset"
 )->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -55,6 +78,7 @@ $expired = $pdo->query(
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($expiringPage, $totalExpiringPages, 'expiring_page') ?>
     <?php endif; ?>
 
     <h3>Already Expired</h3>
@@ -72,6 +96,7 @@ $expired = $pdo->query(
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($expiredPage, $totalExpiredPages, 'expired_page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
