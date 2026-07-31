@@ -65,8 +65,8 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
   - [ ] Driver - (DriverD0001, 1234)
   - [ ] Mechanic - (MechanicME0001, 1234)
   - [ ] Safety Staff - (SafetyStaff0001, 1234)
-  - [ ] Fleet Manager - (FleetManager0001, 1234)
-  - [ ] Workshop Manager (WorkshopManager0001, 1234)
+  - [ ] Fleet Manager - (FleetManager001, 1234)
+  - [ ] Workshop Manager (WorkshopManager001, 1234)
 - [ ] Each dashboard pulls from its relevant slice of `6_business_queries.sql`
 - [ ] Auth/login wired to `User` / `Role`
 
