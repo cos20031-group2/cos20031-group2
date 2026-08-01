@@ -255,8 +255,7 @@ WHERE va.StartDate IS NOT NULL
 ORDER BY va.StartDate;
 
 -- Q13b: AUDIT -- mechanic work sessions now illegal due to a Voided mechanic certification.
--- Same pattern applied to MechanicWorkSession / MechanicCertification, per your note that
--- the Voided-invalidates-past-work logic applies to mechanics too.
+-- Same pattern applied to MechanicWorkSession / MechanicCertification.
 SELECT
     mws.SessionID, mws.MechanicID, me.FullName, mws.ActivityID, mws.StartTime,
     mct.MechanicCertificationType, mc.MechanicCertificationID, mc.IssueDate, mc.ExpiryDate, mc.StatusNotes
