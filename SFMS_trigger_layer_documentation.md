@@ -24,19 +24,19 @@ Manages the lifecycle of assigning a vehicle to a driver, ensuring safety and co
 | `TRG_..._AfterUpdate` | Trigger | `AFTER UPDATE` | Flips vehicle to `Active` on `Pending → In Operation`; re-triages via `fn_NextVehicleStatus` on trip completion/cancellation. |
 
 ### Key Design Decisions
-* **Validation runs at physical transition, not at booking time.**
+* **D1.1 — Validation runs at physical transition, not at booking time.**
   * **Decision:** `BeforeInsert` only validates when `AssignmentStatus = 'In Operation'`. `Pending` inserts skip validation.
   * **Rationale:** `Pending` is just a booking. Validating it checks today's rules against a future date (which may change before pickup). Historical backfills landing directly in `Completed` also skip validation so they aren't rejected by current rules.
-* **The gate re-runs when a booked trip actually starts.**
+* **D1.2 — The gate re-runs when a booked trip actually starts.**
   * **Decision:** `BeforeUpdate` re-runs the full validation gate on the `Pending → In Operation` transition.
   * **Rationale:** Time passes between booking and pickup. A cert could expire, or a vehicle could enter maintenance. This transition is the first time the gate runs for an advanced booking.
-* **Two distinct levels of historical-fact locking.**
+* **D1.3 — Two distinct levels of historical-fact locking.**
   * **Decision:** Once `Completed`/`Cancelled`, *all* columns are locked. Once leaving `Pending`, only core facts (`VIN`, `DriverID`, `DepotID`, `IssueDate`, `StartDate`) are locked; `Status` and `EndDate` remain open.
   * **Rationale:** Protects the "who/what/when" once the trip is no longer provisional, while still allowing the lifecycle status to progress.
-* **Legal transitions are a strict whitelist.**
+* **D1.4 — Legal transitions are a strict whitelist.**
   * **Decision:** Hardcodes exactly two legal transitions: `Pending → {In Operation, Cancelled}` and `In Operation → {Completed, Cancelled}`.
   * **Rationale:** Enforces a true state machine. Prevents skipping steps (e.g., `Pending → Completed`), which would bypass the pickup gate.
-* **Employment status is checked alongside driving eligibility.**
+* **D1.7 — Employment status is checked alongside driving eligibility.**
   * **Decision:** Requires `Driver.EmploymentStatus = 'Active'` in addition to `DrivingEligibility = 'Eligible'`.
   * **Rationale:** Aligns with the schema's separation of employment and driving status. A fully eligible driver who is `On Leave` still shouldn't be handed a company vehicle.
 
@@ -65,19 +65,19 @@ Handles workshop jobs and automatically schedules maintenance based on predictiv
 | `TRG_PredictiveAlert_...` | Triggers | `AFTER INSERT/UPDATE` | Calls `sp_AutoScheduleFromAlert` when an alert escalates to `Scheduled For Inspection` or `Urgent Repair Standby`. |
 
 ### Key Design Decisions
-* **One open job per VIN: Root-cause gate + defense-in-depth.**
+* **D2.1 — One open job per VIN: Root-cause gate + defense-in-depth.**
   * **Decision:** `BeforeInsert` rejects overlapping jobs. `fn_NextVehicleStatus` also independently checks for open jobs.
   * **Rationale:** The insert trigger prevents the root cause. The function acts as a backstop if the gate is ever bypassed (e.g., bulk imports).
-* **`DateClosed` is irreversible.**
+* **D2.2 — `DateClosed` is irreversible.**
   * **Decision:** Blocks `DateClosed` from reverting from `NOT NULL` to `NULL`.
   * **Rationale:** Un-closing a job would silently bypass the one-open-job gate, potentially leaving two open jobs on the same VIN.
-* **Branching on insert prevents historical data bugs.**
+* **D2.3 — Branching on insert prevents historical data bugs.**
   * **Decision:** `AfterInsert` checks if `DateClosed` is already `NOT NULL`. If so, it skips the maintenance flip and just completes linked services.
   * **Rationale:** Prevents historical backfills from permanently locking vehicles in `Under Maintenance` (since the `AfterUpdate` release logic wouldn't fire for a pre-closed insert).
-* **Alert-linked jobs back-write their `ScheduledService`.**
+* **D2.4 — Alert-linked jobs back-write their `ScheduledService`.**
   * **Decision:** When a job closes, it marks the linked `ScheduledService` as completed.
   * **Rationale:** Prevents a scheduled service from sitting in "overdue" status forever after the actual work satisfying it has been completed.
-* **Duplicate guard is keyed on open status, not mere existence.**
+* **D2.6 — Duplicate guard is keyed on open status, not mere existence.**
   * **Decision:** `sp_AutoScheduleFromAlert` checks for existing *open* scheduled services, not just *any* service.
   * **Rationale:** Allows an alert to legitimately get a second auto-scheduled service later if the issue recurs after the first service was completed.
 
@@ -103,22 +103,22 @@ Tracks safety incidents, forces reviews for severe events, and calculates penalt
 | `TRG_SafetyEvent_BeforeUpdate`| Trigger | `BEFORE UPDATE` | Locks all core incident facts. `ReviewState` can only change via session-flag. |
 
 ### Key Design Decisions
-* **Eligibility is recomputed from scratch, never patched incrementally.**
+* **D3.1 — Eligibility is recomputed from scratch, never patched incrementally.**
   * **Decision:** `sp_RecomputeDriverEligibility` evaluates all disqualifying reasons fresh on every call.
   * **Rationale:** Prevents a scenario where clearing one suspension reason accidentally clears another. The answer is always derived from the current, complete state.
-* **"AND-to-Clear" logic for multiple suspension reasons.**
+* **D3.2 — "AND-to-Clear" logic for multiple suspension reasons.**
   * **Decision:** A driver becomes `Eligible` only when *all* open disqualifying reasons (e.g., open review AND open retraining) are cleared.
   * **Rationale:** Treats the reasons as independent. A critical-event review and a score-driven retraining have different causes; fixing one shouldn't clear the other.
-* **Session-variable guard protects cached columns.**
+* **D3.3 — Session-variable guard protects cached columns.**
   * **Decision:** `DrivingEligibility` and `ReviewState` can only be updated if a specific session variable is set to `1` by the authorized trigger/procedure.
   * **Rationale:** MySQL lacks column-level routine permissions. This prevents developers/DBAs from accidentally manually overriding automated safety checks.
-* **Severity routing is forced at insert.**
+* **D3.4 — Severity routing is forced at insert.**
   * **Decision:** `BeforeInsert` unconditionally sets `ReviewState = 'Pending'` for High/Critical events.
   * **Rationale:** Makes it structurally impossible for the app to forget to queue a review for a severe incident.
-* **Only Critical severity suspends the driver immediately.**
+* **D3.5 — Only Critical severity suspends the driver immediately.**
   * **Decision:** `AfterInsert` calls the eligibility recompute for `Critical` only, even though both High and Critical force a review.
   * **Rationale:** Matches the brief exactly. High events get a review queued but don't immediately suspend the driver.
-* **Fails loudly if monthly scores are missing.**
+* **D3.7 — Fails loudly if monthly scores are missing.**
   * **Decision:** `sp_EvaluatePenaltiesForEvent` throws a `SIGNAL` error if the driver's monthly score row doesn't exist.
   * **Rationale:** Forces the monthly initialization job to run first, preventing silent data corruption or incorrect score creation.
 
@@ -148,19 +148,19 @@ Manages the downstream consequences of safety events: closing reviews, deducting
 | `sp_InitializeMonthlyScores`| Procedure | (Called externally) | Creates a `DriverMonthlySafetyScore` row at 100 for eligible drivers. Idempotent. |
 
 ### Key Design Decisions
-* **Read-before-close is strictly enforced.**
+* **D4.2 — Read-before-close is strictly enforced.**
   * **Decision:** Blocks `Closed` on insert. Blocks `Unread → Closed` on update.
   * **Rationale:** Fulfills the schema's promise that reviewers must actually look at an incident before closing it.
-* **The "Score Cascade" handles everything automatically.**
+* **D4.5 — The "Score Cascade" handles everything automatically.**
   * **Decision:** When a penalty is inserted, the trigger automatically deducts the score, checks thresholds (≤75 for coaching, ≤50 for retraining), creates those records if needed, and unconditionally recalculates eligibility.
   * **Rationale:** Ensures that the moment a score drops, the correct administrative and safety actions are triggered without relying on the app.
-* **Coaching duplicate-guards check for *open* status.**
+* **D4.6 — Coaching duplicate-guards check for *open* status.**
   * **Decision:** Checks for existing open coaching/retraining records, not just historical existence.
   * **Rationale:** Allows a driver to legitimately be re-enrolled later if a prior requirement was completed.
-* **`sp_InitializeMonthlyScores` is safely re-runnable.**
+* **D4.10 — `sp_InitializeMonthlyScores` is safely re-runnable.**
   * **Decision:** Guarded by `NOT EXISTS` and `UNIQUE` constraints; designed to be called multiple times for the same month.
   * **Rationale:** Catches drivers returning from leave mid-month without duplicating rows, ensuring they have a score row before penalties are applied.
-* **Drivers without a depot are skipped in monthly scores.**
+* **D4.11 — Drivers without a depot are skipped in monthly scores.**
   * **Decision:** Excludes drivers with `CurrentDepotID IS NULL` from initialization.
   * **Rationale:** They cannot be assigned vehicles or generate safety events yet. Skipping them prevents orphaned score rows.
 
@@ -190,16 +190,16 @@ Manages mechanic work sessions, parts inventory, and warranty claims.
 | `TRG_WarrantyClaim_BeforeUpdate` | Trigger | `BEFORE UPDATE` | Locks Activity/Source/Date. Status/Resolution stay open. |
 
 ### Key Design Decisions
-* **Mechanic gate checks employment + specific cert.**
+* **D5.1 — Mechanic gate checks employment + specific cert.**
   * **Decision:** Requires `EmploymentStatus = 'Active'` and the exact cert named by `ActivityType.RequiredMechanicCertification`.
   * **Rationale:** Mirrors driver logic. Simpler than the driver gate because an activity requires exactly *one* specific cert, not a set of many.
-* **Inventory math is protected by a 3-trigger cycle.**
+* **D5.3 — Inventory math is protected by a 3-trigger cycle.**
   * **Decision:** `BeforeInsert` gates sufficient stock. `AfterInsert` deducts stock. `AfterDelete` restores stock.
   * **Rationale:** Checking first prevents negative stock errors. Tying the deduction to the insert ensures the math is perfectly synced. No `AfterUpdate` is needed because quantity is locked (see below).
-* **Correcting parts usage means Delete + Re-insert.**
+* **D5.4 — Correcting parts usage means Delete + Re-insert.**
   * **Decision:** Locks `QuantityUsed` and `UnitCost`. If there's a mistake, the row must be deleted and recreated.
   * **Rationale:** Because inventory was already deducted based on the original numbers, silently editing the quantity would break the inventory math.
-* **`ClaimID` is validated against the specific activity.**
+* **D5.5 — `ClaimID` is validated against the specific activity.**
   * **Decision:** When linking a warranty claim, verifies `WarrantyClaim.ActivityID` matches the current `ActivityID`.
   * **Rationale:** A standard Foreign Key only checks if the claim *exists*. This prevents cross-job data corruption by ensuring it belongs to the *correct job*.
 
