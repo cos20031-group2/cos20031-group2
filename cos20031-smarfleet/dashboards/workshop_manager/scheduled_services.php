@@ -44,6 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $perPage = 10;
+$depots = $pdo->query('SELECT DepotID, DepotName FROM depot ORDER BY DepotName')->fetchAll();
 
 // Q22: overdue services
 $overduePage = currentPage('overdue_page');
@@ -66,30 +67,48 @@ $overdue = $pdo->query(
 
 // Q25: vehicles awaiting inspection
 $awaitingPage = currentPage('awaiting_page');
-$totalAwaiting = (int)$pdo->query(
-    "SELECT COUNT(*) FROM vehicle v JOIN vehiclestatus vs ON vs.VehicleStatusID = v.OperationalStatus WHERE vs.VehicleStatus = 'Awaiting Inspection'"
-)->fetchColumn();
+$awaitingDepot = $_GET['awaiting_depot_id'] ?? '';
+$awaitingWhere = "WHERE vs.VehicleStatus = 'Awaiting Inspection' AND (:depotId = '' OR d.DepotID = :depotId)";
+$awaitingParams = ['depotId' => $awaitingDepot];
+
+$totalAwaiting = $pdo->prepare(
+    "SELECT COUNT(*) FROM vehicle v
+     JOIN vehiclestatus vs ON vs.VehicleStatusID = v.OperationalStatus
+     JOIN depot d ON d.DepotID = v.DepotID
+     $awaitingWhere"
+);
+$totalAwaiting->execute($awaitingParams);
+$totalAwaiting = (int)$totalAwaiting->fetchColumn();
 $totalAwaitingPages = max(1, (int)ceil($totalAwaiting / $perPage));
 $awaitingPage = min($awaitingPage, $totalAwaitingPages);
 $awaitingOffset = ($awaitingPage - 1) * $perPage;
 
-$awaiting = $pdo->query(
+$awaitingStmt = $pdo->prepare(
     "SELECT v.VIN, v.Model, v.Manufacturer, d.DepotName, v.Odometer
      FROM vehicle v
      JOIN vehiclestatus vs ON vs.VehicleStatusID = v.OperationalStatus
      JOIN depot d ON d.DepotID = v.DepotID
-     WHERE vs.VehicleStatus = 'Awaiting Inspection'
+     $awaitingWhere
      LIMIT $perPage OFFSET $awaitingOffset"
-)->fetchAll();
+);
+$awaitingStmt->execute($awaitingParams);
+$awaiting = $awaitingStmt->fetchAll();
 
 // All schedules (for general management)
 $allPage = currentPage('all_page');
 $statusFilter = $_GET['status'] ?? '';
-$whereClause = "WHERE (:status = '' OR ss.Status = :status)";
-$filterParams = ['status' => $statusFilter];
+$allVin = $_GET['all_vin'] ?? '';
+$allDateFrom = $_GET['all_date_from'] ?? '';
+$allDateTo = $_GET['all_date_to'] ?? '';
 
-$countStmt = $pdo->prepare("SELECT COUNT(*) FROM scheduledservice ss $whereClause");
-$countStmt->execute($filterParams);
+$allWhere = "WHERE (:status = '' OR ss.Status = :status)
+       AND (:vin = '' OR ss.VIN = :vin)
+       AND (:dateFrom = '' OR ss.ScheduledDate >= :dateFrom)
+       AND (:dateTo = '' OR ss.ScheduledDate <= :dateTo)";
+$allParams = ['status' => $statusFilter, 'vin' => $allVin, 'dateFrom' => $allDateFrom, 'dateTo' => $allDateTo];
+
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM scheduledservice ss $allWhere");
+$countStmt->execute($allParams);
 $totalAll = (int)$countStmt->fetchColumn();
 $totalAllPages = max(1, (int)ceil($totalAll / $perPage));
 $allPage = min($allPage, $totalAllPages);
@@ -98,11 +117,11 @@ $allOffset = ($allPage - 1) * $perPage;
 $stmt = $pdo->prepare(
     "SELECT ss.ScheduleID, ss.VIN, v.RegistrationNumber, ss.ScheduledDate, ss.CompletionDate, ss.Status, ss.Reason
      FROM scheduledservice ss JOIN vehicle v ON v.VIN = ss.VIN
-     $whereClause
+     $allWhere
      ORDER BY ss.ScheduledDate DESC
      LIMIT $perPage OFFSET $allOffset"
 );
-$stmt->execute($filterParams);
+$stmt->execute($allParams);
 $allSchedules = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -164,6 +183,16 @@ $allSchedules = $stmt->fetchAll();
     <?php endif; ?>
 
     <h3>Vehicles Awaiting Inspection</h3>
+    <form method="GET">
+        <select name="awaiting_depot_id">
+            <option value="">All Depots</option>
+            <?php foreach ($depots as $d): ?>
+                <option value="<?= $d['DepotID'] ?>" <?= $awaitingDepot == $d['DepotID'] ? 'selected' : '' ?>><?= htmlspecialchars($d['DepotName']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit">Filter</button>
+        <a href="scheduled_services.php">Clear</a>
+    </form>
     <?php if (count($awaiting) === 0): ?>
         <p>No vehicles currently awaiting inspection.</p>
     <?php else: ?>
@@ -188,6 +217,9 @@ $allSchedules = $stmt->fetchAll();
                 <option value="<?= $s ?>" <?= $statusFilter === $s ? 'selected' : '' ?>><?= $s ?></option>
             <?php endforeach; ?>
         </select>
+        <input type="text" name="all_vin" placeholder="VIN" value="<?= htmlspecialchars($allVin) ?>">
+        From: <input type="date" name="all_date_from" value="<?= htmlspecialchars($allDateFrom) ?>">
+        To: <input type="date" name="all_date_to" value="<?= htmlspecialchars($allDateTo) ?>">
         <button type="submit">Filter</button>
         <a href="scheduled_services.php">Clear</a>
     </form>

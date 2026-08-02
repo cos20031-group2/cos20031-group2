@@ -42,24 +42,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $belowThresholdOnly = isset($_GET['below_threshold']);
+$nameSearch = $_GET['name_search'] ?? '';
 $editPn = $_GET['edit'] ?? '';
 
 $perPage = 10;
 $page = currentPage('page');
 
-$whereClause = $belowThresholdOnly ? 'WHERE CurrentStock < ReorderThreshold' : '';
+$whereClause = "WHERE (:nameSearch = '' OR PartName LIKE :nameSearch)"
+    . ($belowThresholdOnly ? ' AND CurrentStock < ReorderThreshold' : '');
+$filterParams = ['nameSearch' => $nameSearch !== '' ? '%' . $nameSearch . '%' : ''];
 
-$totalRows = (int)$pdo->query("SELECT COUNT(*) FROM part $whereClause")->fetchColumn();
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM part $whereClause");
+$countStmt->execute($filterParams);
+$totalRows = (int)$countStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
 $page = min($page, $totalPages);
 $offset = ($page - 1) * $perPage;
 
-$parts = $pdo->query(
+$stmt = $pdo->prepare(
     "SELECT PartNumber, PartName, Description, CurrentStock, ReorderThreshold, UnitPrice
      FROM part $whereClause
      ORDER BY (CurrentStock < ReorderThreshold) DESC, PartName
      LIMIT $perPage OFFSET $offset"
-)->fetchAll();
+);
+$stmt->execute($filterParams);
+$parts = $stmt->fetchAll();
 
 $editPart = null;
 if ($editPn !== '') {
@@ -105,7 +112,10 @@ if ($editPn !== '') {
 
     <h3>Inventory</h3>
     <form method="GET">
-        <label><input type="checkbox" name="below_threshold" value="1" <?= $belowThresholdOnly ? 'checked' : '' ?> onchange="this.form.submit()"> Below reorder threshold only</label>
+        <input type="text" name="name_search" placeholder="Search part name" value="<?= htmlspecialchars($nameSearch) ?>">
+        <label><input type="checkbox" name="below_threshold" value="1" <?= $belowThresholdOnly ? 'checked' : '' ?>> Below reorder threshold only</label>
+        <button type="submit">Filter</button>
+        <a href="parts.php">Clear</a>
     </form>
 
     <table>

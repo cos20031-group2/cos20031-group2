@@ -53,6 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $mechanicId = $_GET['mechanic_id'] ?? '';
 $certTypeFilter = $_GET['cert_type_filter'] ?? '';
+$workshopFilter = $_GET['workshop_filter'] ?? '';
+$workshops = $pdo->query('SELECT WorkshopID, Name FROM workshop ORDER BY Name')->fetchAll();
 $certTypes = $pdo->query('SELECT MechanicCertificationTypeID, MechanicCertificationType FROM mechaniccertificationtype ORDER BY MechanicCertificationType')->fetchAll();
 
 $mechanic = null;
@@ -80,10 +82,17 @@ if ($mechanicId !== '') {
 $perPage = 10;
 $page = currentPage('page');
 $whereClause = "WHERE mc.Status IN ('Active', 'Reinstated') AND mc.ExpiryDate > CURDATE()
-       AND (:certType = '' OR mct.MechanicCertificationTypeID = :certType)";
-$filterParams = ['certType' => $certTypeFilter];
+       AND (:certType = '' OR mct.MechanicCertificationTypeID = :certType)
+       AND (:workshopId = '' OR w.WorkshopID = :workshopId)";
+$filterParams = ['certType' => $certTypeFilter, 'workshopId' => $workshopFilter];
 
-$countStmt = $pdo->prepare("SELECT COUNT(*) FROM mechaniccertification mc JOIN mechaniccertificationtype mct ON mct.MechanicCertificationTypeID = mc.MechanicCertificationTypeID $whereClause");
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*) FROM mechaniccertification mc
+     JOIN mechanic m ON m.MechanicID = mc.MechanicID
+     JOIN workshop w ON w.WorkshopID = m.WorkshopID
+     JOIN mechaniccertificationtype mct ON mct.MechanicCertificationTypeID = mc.MechanicCertificationTypeID
+     $whereClause"
+);
 $countStmt->execute($filterParams);
 $totalRows = (int)$countStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
@@ -186,6 +195,12 @@ $roster = $roster->fetchAll();
             <option value="">All Certification Types</option>
             <?php foreach ($certTypes as $ct): ?>
                 <option value="<?= $ct['MechanicCertificationTypeID'] ?>" <?= $certTypeFilter == $ct['MechanicCertificationTypeID'] ? 'selected' : '' ?>><?= htmlspecialchars($ct['MechanicCertificationType']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="workshop_filter">
+            <option value="">All Workshops</option>
+            <?php foreach ($workshops as $w): ?>
+                <option value="<?= $w['WorkshopID'] ?>" <?= $workshopFilter == $w['WorkshopID'] ? 'selected' : '' ?>><?= htmlspecialchars($w['Name']) ?></option>
             <?php endforeach; ?>
         </select>
         <button type="submit">Filter</button>

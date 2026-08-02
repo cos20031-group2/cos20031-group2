@@ -64,6 +64,8 @@ $openSchedules = $pdo->query(
 $statusFilter = $_GET['status'] ?? 'open';
 $workshopFilter = $_GET['workshop_id'] ?? '';
 $vinFilter = $_GET['vin'] ?? '';
+$dateFrom = $_GET['date_from'] ?? '';
+$dateTo = $_GET['date_to'] ?? '';
 
 $perPage = 10;
 $page = currentPage('page');
@@ -73,8 +75,10 @@ $statusCondition = $statusFilter === 'open' ? 'mj.DateClosed IS NULL'
 
 $whereClause = "WHERE $statusCondition
        AND (:workshopId = '' OR mj.WorkshopID = :workshopId)
-       AND (:vin = '' OR mj.VIN = :vin)";
-$filterParams = ['workshopId' => $workshopFilter, 'vin' => $vinFilter];
+       AND (:vin = '' OR mj.VIN = :vin)
+       AND (:dateFrom = '' OR mj.DateOpened >= :dateFrom)
+       AND (:dateTo = '' OR mj.DateOpened <= :dateTo)";
+$filterParams = ['workshopId' => $workshopFilter, 'vin' => $vinFilter, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo];
 
 $countStmt = $pdo->prepare("SELECT COUNT(*) FROM maintenancejob mj $whereClause");
 $countStmt->execute($filterParams);
@@ -147,6 +151,8 @@ $jobs = $stmt->fetchAll();
             <?php endforeach; ?>
         </select>
         <input type="text" name="vin" placeholder="VIN" value="<?= htmlspecialchars($vinFilter) ?>">
+        From: <input type="date" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
+        To: <input type="date" name="date_to" value="<?= htmlspecialchars($dateTo) ?>">
         <button type="submit">Filter</button>
         <a href="jobs.php">Clear</a>
     </form>

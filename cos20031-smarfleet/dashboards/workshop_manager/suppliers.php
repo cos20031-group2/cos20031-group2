@@ -7,17 +7,24 @@ require_once __DIR__ . '/../../includes/pagination.php';
 
 $partNumber = $_GET['part_number'] ?? '';
 $primaryOnly = isset($_GET['primary_only']);
+$supplierName = $_GET['supplier_name'] ?? '';
 
 $parts = $pdo->query('SELECT PartNumber, PartName FROM part ORDER BY PartName')->fetchAll();
 
 $perPage = 10;
 $page = currentPage('page');
 
-$whereClause = "WHERE (:partNumber = '' OR p.PartNumber = :partNumber)"
+$whereClause = "WHERE (:partNumber = '' OR p.PartNumber = :partNumber)
+       AND (:supplierName = '' OR s.SupplierName LIKE :supplierName)"
     . ($primaryOnly ? ' AND ps.IsPrimary = TRUE' : '');
-$filterParams = ['partNumber' => $partNumber];
+$filterParams = ['partNumber' => $partNumber, 'supplierName' => $supplierName !== '' ? '%' . $supplierName . '%' : ''];
 
-$countStmt = $pdo->prepare("SELECT COUNT(*) FROM partsupplier ps JOIN part p ON p.PartNumber = ps.PartNumber $whereClause");
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*) FROM partsupplier ps
+     JOIN part p ON p.PartNumber = ps.PartNumber
+     JOIN supplier s ON s.SupplierID = ps.SupplierID
+     $whereClause"
+);
 $countStmt->execute($filterParams);
 $totalRows = (int)$countStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
@@ -56,6 +63,7 @@ $results = $stmt->fetchAll();
             <?php endforeach; ?>
         </select>
         <label><input type="checkbox" name="primary_only" value="1" <?= $primaryOnly ? 'checked' : '' ?>> Primary supplier only</label>
+        <input type="text" name="supplier_name" placeholder="Supplier name" value="<?= htmlspecialchars($supplierName) ?>">
         <button type="submit">Filter</button>
         <a href="suppliers.php">Clear</a>
     </form>

@@ -6,15 +6,32 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/pagination.php';
 
 $perPage = 10;
+$depots = $pdo->query('SELECT DepotID, DepotName FROM depot ORDER BY DepotName')->fetchAll();
+$manufacturers = $pdo->query('SELECT DISTINCT Manufacturer FROM vehicle ORDER BY Manufacturer')->fetchAll(PDO::FETCH_COLUMN);
+$activityTypes = $pdo->query('SELECT ActivityTypeID, ActivityType FROM activitytype ORDER BY ActivityType')->fetchAll();
 
-// Q20: downtime
+// --- Downtime (Q20) ---
 $downtimePage = currentPage('downtime_page');
-$totalDowntime = (int)$pdo->query('SELECT COUNT(DISTINCT mj.VIN) FROM maintenancejob mj')->fetchColumn();
+$downtimeDepot = $_GET['downtime_depot_id'] ?? '';
+$downtimeManufacturer = $_GET['downtime_manufacturer'] ?? '';
+
+$downtimeWhere = "WHERE (:depotId = '' OR d.DepotID = :depotId)
+       AND (:manufacturer = '' OR v.Manufacturer = :manufacturer)";
+$downtimeParams = ['depotId' => $downtimeDepot, 'manufacturer' => $downtimeManufacturer];
+
+$totalDowntime = $pdo->prepare(
+    "SELECT COUNT(*) FROM (
+        SELECT v.VIN FROM maintenancejob mj JOIN vehicle v ON v.VIN = mj.VIN JOIN depot d ON d.DepotID = v.DepotID
+        $downtimeWhere GROUP BY v.VIN
+     ) AS sub"
+);
+$totalDowntime->execute($downtimeParams);
+$totalDowntime = (int)$totalDowntime->fetchColumn();
 $totalDowntimePages = max(1, (int)ceil($totalDowntime / $perPage));
 $downtimePage = min($downtimePage, $totalDowntimePages);
 $downtimeOffset = ($downtimePage - 1) * $perPage;
 
-$downtime = $pdo->query(
+$downtimeStmt = $pdo->prepare(
     "SELECT
         v.VIN, v.Model, v.Manufacturer, d.DepotName,
         COUNT(mj.JobID) AS JobCount,
@@ -26,37 +43,52 @@ $downtime = $pdo->query(
      FROM maintenancejob mj
      JOIN vehicle v ON v.VIN = mj.VIN
      JOIN depot d ON d.DepotID = v.DepotID
+     $downtimeWhere
      GROUP BY v.VIN, v.Model, v.Manufacturer, d.DepotName
      ORDER BY TotalDowntimeHours DESC
      LIMIT $perPage OFFSET $downtimeOffset"
-)->fetchAll();
+);
+$downtimeStmt->execute($downtimeParams);
+$downtime = $downtimeStmt->fetchAll();
 
-// Q23: repeated component failures
+// --- Repeated component failures (Q23) ---
 $repeatPage = currentPage('repeat_page');
-$totalRepeat = (int)$pdo->query(
+$repeatVin = $_GET['repeat_vin'] ?? '';
+$repeatActivityType = $_GET['repeat_activity_type_id'] ?? '';
+
+$repeatWhere = "WHERE ma.RepeatedFaultFlag = TRUE
+       AND (:vin = '' OR mj.VIN = :vin)
+       AND (:activityTypeId = '' OR at.ActivityTypeID = :activityTypeId)";
+$repeatParams = ['vin' => $repeatVin, 'activityTypeId' => $repeatActivityType];
+
+$totalRepeat = $pdo->prepare(
     "SELECT COUNT(*) FROM (
         SELECT mj.VIN, at.ActivityType FROM maintenanceactivity ma
         JOIN maintenancejob mj ON mj.JobID = ma.JobID
         JOIN activitytype at ON at.ActivityTypeID = ma.ActivityTypeID
-        WHERE ma.RepeatedFaultFlag = TRUE
+        $repeatWhere
         GROUP BY mj.VIN, at.ActivityType
      ) AS sub"
-)->fetchColumn();
+);
+$totalRepeat->execute($repeatParams);
+$totalRepeat = (int)$totalRepeat->fetchColumn();
 $totalRepeatPages = max(1, (int)ceil($totalRepeat / $perPage));
 $repeatPage = min($repeatPage, $totalRepeatPages);
 $repeatOffset = ($repeatPage - 1) * $perPage;
 
-$repeated = $pdo->query(
+$repeatStmt = $pdo->prepare(
     "SELECT mj.VIN, v.Model, at.ActivityType, COUNT(*) AS RepeatFaultCount
      FROM maintenanceactivity ma
      JOIN maintenancejob mj ON mj.JobID = ma.JobID
      JOIN vehicle v ON v.VIN = mj.VIN
      JOIN activitytype at ON at.ActivityTypeID = ma.ActivityTypeID
-     WHERE ma.RepeatedFaultFlag = TRUE
+     $repeatWhere
      GROUP BY mj.VIN, v.Model, at.ActivityType
      ORDER BY RepeatFaultCount DESC
      LIMIT $perPage OFFSET $repeatOffset"
-)->fetchAll();
+);
+$repeatStmt->execute($repeatParams);
+$repeated = $repeatStmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html>
@@ -69,6 +101,23 @@ $repeated = $pdo->query(
 
     <a class="back-link" href="workshop_manager_index.php">&larr; Back to dashboard</a>
     <h2>Vehicle Downtime</h2>
+    <form method="GET">
+        <input type="hidden" name="repeat_page" value="<?= $repeatPage ?>">
+        <select name="downtime_depot_id">
+            <option value="">All Depots</option>
+            <?php foreach ($depots as $d): ?>
+                <option value="<?= $d['DepotID'] ?>" <?= $downtimeDepot == $d['DepotID'] ? 'selected' : '' ?>><?= htmlspecialchars($d['DepotName']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="downtime_manufacturer">
+            <option value="">All Manufacturers</option>
+            <?php foreach ($manufacturers as $m): ?>
+                <option value="<?= htmlspecialchars($m) ?>" <?= $downtimeManufacturer === $m ? 'selected' : '' ?>><?= htmlspecialchars($m) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit">Filter</button>
+        <a href="vehicle_maintenance_report.php">Clear</a>
+    </form>
     <table>
         <tr><th>Vehicle</th><th>Depot</th><th>Jobs</th><th>Recorded (hrs)</th><th>In-Progress Est. (hrs)</th><th>Total (hrs)</th></tr>
         <?php foreach ($downtime as $d): ?>
@@ -85,8 +134,20 @@ $repeated = $pdo->query(
     <?= paginationControls($downtimePage, $totalDowntimePages, 'downtime_page') ?>
 
     <h2>Vehicles with Repeated Component Failures</h2>
+    <form method="GET">
+        <input type="hidden" name="downtime_page" value="<?= $downtimePage ?>">
+        <input type="text" name="repeat_vin" placeholder="VIN" value="<?= htmlspecialchars($repeatVin) ?>">
+        <select name="repeat_activity_type_id">
+            <option value="">All Activity Types</option>
+            <?php foreach ($activityTypes as $at): ?>
+                <option value="<?= $at['ActivityTypeID'] ?>" <?= $repeatActivityType == $at['ActivityTypeID'] ? 'selected' : '' ?>><?= htmlspecialchars($at['ActivityType']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit">Filter</button>
+        <a href="vehicle_maintenance_report.php">Clear</a>
+    </form>
     <?php if (count($repeated) === 0): ?>
-        <p>No repeated faults on record.</p>
+        <p>No repeated faults matching this filter.</p>
     <?php else: ?>
         <table>
             <tr><th>Vehicle</th><th>Component / Activity Type</th><th>Repeat Count</th></tr>

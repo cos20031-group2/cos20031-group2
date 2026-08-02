@@ -31,13 +31,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_alert'])) {
 }
 
 $statusFilter = $_GET['status'] ?? '';
+$vin = $_GET['vin'] ?? '';
+$alertTypeId = $_GET['alert_type_id'] ?? '';
+$depotId = $_GET['depot_id'] ?? '';
+$dateFrom = $_GET['date_from'] ?? '';
+$dateTo = $_GET['date_to'] ?? '';
+
+$alertTypes = $pdo->query('SELECT AlertTypeID, AlertType FROM alerttype ORDER BY AlertType')->fetchAll();
+$depots = $pdo->query('SELECT DepotID, DepotName FROM depot ORDER BY DepotName')->fetchAll();
+
 $perPage = 10;
 $page = currentPage('page');
 
-$whereClause = "WHERE (:status = '' OR pa.AlertStatus = :status)";
-$filterParams = ['status' => $statusFilter];
+$whereClause = "WHERE (:status = '' OR pa.AlertStatus = :status)
+       AND (:vin = '' OR pa.VIN = :vin)
+       AND (:alertTypeId = '' OR pa.AlertTypeID = :alertTypeId)
+       AND (:depotId = '' OR v.DepotID = :depotId)
+       AND (:dateFrom = '' OR pa.DateGenerated >= :dateFrom)
+       AND (:dateTo = '' OR pa.DateGenerated <= :dateTo)";
+$filterParams = [
+    'status' => $statusFilter, 'vin' => $vin, 'alertTypeId' => $alertTypeId,
+    'depotId' => $depotId, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo,
+];
 
-$countStmt = $pdo->prepare("SELECT COUNT(*) FROM predictivealert pa $whereClause");
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM predictivealert pa JOIN vehicle v ON v.VIN = pa.VIN $whereClause");
 $countStmt->execute($filterParams);
 $totalRows = (int)$countStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
@@ -45,7 +62,7 @@ $page = min($page, $totalPages);
 $offset = ($page - 1) * $perPage;
 
 $stmt = $pdo->prepare(
-    "SELECT pa.AlertID, pa.VIN, v.Model, v.Manufacturer, at.AlertType, pa.DateGenerated,
+    "SELECT pa.AlertID, pa.VIN, v.Model, v.Manufacturer, v.RegistrationNumber, at.AlertType, pa.DateGenerated,
             pa.AlertStatus, pa.ActionTaken, pa.ResolutionDate
      FROM predictivealert pa
      JOIN vehicle v ON v.VIN = pa.VIN
@@ -79,10 +96,26 @@ $alerts = $stmt->fetchAll();
                 <option value="<?= $s ?>" <?= $statusFilter === $s ? 'selected' : '' ?>><?= $s ?></option>
             <?php endforeach; ?>
         </select>
+        <input type="text" name="vin" placeholder="VIN" value="<?= htmlspecialchars($vin) ?>">
+        <select name="alert_type_id">
+            <option value="">All Alert Types</option>
+            <?php foreach ($alertTypes as $at): ?>
+                <option value="<?= $at['AlertTypeID'] ?>" <?= $alertTypeId == $at['AlertTypeID'] ? 'selected' : '' ?>><?= htmlspecialchars($at['AlertType']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="depot_id">
+            <option value="">All Depots</option>
+            <?php foreach ($depots as $d): ?>
+                <option value="<?= $d['DepotID'] ?>" <?= $depotId == $d['DepotID'] ? 'selected' : '' ?>><?= htmlspecialchars($d['DepotName']) ?></option>
+            <?php endforeach; ?>
+        </select><br><br>
+        From: <input type="date" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
+        To: <input type="date" name="date_to" value="<?= htmlspecialchars($dateTo) ?>">
         <button type="submit">Filter</button>
         <a href="alerts.php">Clear</a>
     </form>
 
+    <p><?= htmlspecialchars($totalRows) ?> alert(s)</p>
     <p><em>Escalating to "Scheduled For Inspection" or "Urgent Repair Standby" automatically creates a ScheduledService entry for the vehicle.</em></p>
 
     <table>
@@ -90,7 +123,7 @@ $alerts = $stmt->fetchAll();
         <?php foreach ($alerts as $a): ?>
             <tr>
                 <td><?= htmlspecialchars($a['DateGenerated']) ?></td>
-                <td><?= htmlspecialchars($a['Manufacturer']) ?> <?= htmlspecialchars($a['Model']) ?> (<?= htmlspecialchars($a['VIN']) ?>)</td>
+                <td><?= htmlspecialchars($a['Manufacturer']) ?> <?= htmlspecialchars($a['Model']) ?> (<?= htmlspecialchars($a['RegistrationNumber']) ?>)</td>
                 <td><?= htmlspecialchars($a['AlertType']) ?></td>
                 <td class="<?= $a['AlertStatus'] === 'Urgent Repair Standby' ? 'score-critical' : '' ?>"><?= htmlspecialchars($a['AlertStatus']) ?></td>
                 <td><?= htmlspecialchars($a['ActionTaken'] ?? '') ?></td>
