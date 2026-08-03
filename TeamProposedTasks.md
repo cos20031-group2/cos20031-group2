@@ -1,4 +1,4 @@
-# Smart Fleet Management System — Team Plan (Draft)
+# Smart Fleet Management System — Team Plan
 
 *Most of this is still open for discussion, feel free flag anything you'd change.*
 
@@ -19,7 +19,7 @@
 Comment: Finnished, needs checking and add indexes.
 - [ ] Views / transactions needed for the CRUD dashboards
 - [X] Add `Role` + `User` tables for login/dashboard access — **please decide FK pattern below before touching this**
-- [ ] Indexes, once queries are final (ie., 6_business_queries.sql): identify candidate columns from actual query patterns → run `EXPLAIN` + timing before/after on the seed dataset → document a retain/discard decision per index with the measured time improvement
+- [X] Indexes, once queries are final (ie., 6_business_queries.sql): identify candidate columns from actual query patterns → run `EXPLAIN` + timing before/after on the seed dataset → document a retain/discard decision per index with the measured time improvement
 
 ### `Role` / `User` design (Done! Now in schema.sql as section 7)
 
@@ -43,8 +43,8 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 
 ## Documentation in Confluence
 
-- [ ] Use cases + user stories — one per stakeholder need listed in the brief's "Use of Fleet Database" section
-- [ ] Seed-data generator write-up (staged design, why insert order respects the triggers, verification tooling)
+- [X] Use cases + user stories — one per stakeholder need listed in the brief's "Use of Fleet Database" section
+- [X] Seed-data generator write-up (staged design, why insert order respects the triggers, verification tooling)
 - [X] Physical model write-up (conceptual → physical translation decisions)
 - [ ] Example data per table, pulled from the actual generated seed data
 - [ ] Draw some UML diagrams (class, use case, sequence)
