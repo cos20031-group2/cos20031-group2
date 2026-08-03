@@ -43,7 +43,7 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 
 ## Documentation in Confluence
 
-- [ ] Use cases + user stories — one per stakeholder need listed in the brief's "Use of Fleet Database" section
+- [X] Use cases + user stories — one per stakeholder need listed in the brief's "Use of Fleet Database" section
 - [X] Seed-data generator write-up (staged design, why insert order respects the triggers, verification tooling)
 - [X] Physical model write-up (conceptual → physical translation decisions)
 - [ ] Example data per table, pulled from the actual generated seed data
