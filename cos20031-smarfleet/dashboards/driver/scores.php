@@ -3,13 +3,25 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Driver']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $driverId = $_SESSION['driver_id'];
 
+$perPage = 10;
+$page = currentPage('page');
+
+$countStmt = $pdo->prepare('SELECT COUNT(*) FROM drivermonthlysafetyscore WHERE DriverID = :id');
+$countStmt->execute(['id' => $driverId]);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT Month, Year, Score FROM drivermonthlysafetyscore
+    "SELECT Month, Year, Score FROM drivermonthlysafetyscore
      WHERE DriverID = :id
-     ORDER BY Year DESC, Month DESC'
+     ORDER BY Year DESC, Month DESC
+     LIMIT $perPage OFFSET $offset"
 );
 $stmt->execute(['id' => $driverId]);
 $scores = $stmt->fetchAll();
@@ -61,6 +73,7 @@ $monthNames = [1=>'January',2=>'February',3=>'March',4=>'April',5=>'May',6=>'Jun
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($page, $totalPages, 'page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>
