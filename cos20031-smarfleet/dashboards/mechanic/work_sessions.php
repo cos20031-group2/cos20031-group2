@@ -3,6 +3,8 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Mechanic']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/errors.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $mechanicId = $_SESSION['mechanic_id'];
 $message = '';
@@ -22,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_session'])) {
     } catch (PDOException $e) {
         // Surfaces the trigger's SIGNAL message (e.g. missing certification)
         // rather than a raw stack trace.
-        $error = $e->getMessage();
+        $error = friendlySqlError($e);
     }
 }
 
@@ -39,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['close_session'])) {
         $stmt->execute(['sessionId' => $sessionId, 'mechanicId' => $mechanicId]);
         $message = 'Work session closed.';
     } catch (PDOException $e) {
-        $error = $e->getMessage();
+        $error = friendlySqlError($e);
     }
 }
 
@@ -66,15 +68,26 @@ $stmt->execute(['mechanicId' => $mechanicId]);
 $availableActivities = $stmt->fetchAll();
 
 // This mechanic's full work session history
+$perPage = 10;
+$page = currentPage('page');
+
+$countStmt = $pdo->prepare('SELECT COUNT(*) FROM mechanicworksession WHERE MechanicID = :mechanicId');
+$countStmt->execute(['mechanicId' => $mechanicId]);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT mws.SessionID, mws.StartTime, mws.EndTime, mj.JobID, v.RegistrationNumber, at.ActivityType
+    "SELECT mws.SessionID, mws.StartTime, mws.EndTime, mj.JobID, v.RegistrationNumber, at.ActivityType
      FROM mechanicworksession mws
      JOIN maintenanceactivity ma ON ma.ActivityID = mws.ActivityID
      JOIN maintenancejob mj ON mj.JobID = ma.JobID
      JOIN vehicle v ON v.VIN = mj.VIN
      JOIN activitytype at ON at.ActivityTypeID = ma.ActivityTypeID
      WHERE mws.MechanicID = :mechanicId
-     ORDER BY mws.StartTime DESC'
+     ORDER BY mws.StartTime DESC
+     LIMIT $perPage OFFSET $offset"
 );
 $stmt->execute(['mechanicId' => $mechanicId]);
 $sessions = $stmt->fetchAll();
@@ -148,6 +161,7 @@ $sessions = $stmt->fetchAll();
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($page, $totalPages, 'page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

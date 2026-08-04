@@ -3,18 +3,30 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Driver']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $driverId = $_SESSION['driver_id'];
 
+$perPage = 10;
+$page = currentPage('page');
+
+$countStmt = $pdo->prepare('SELECT COUNT(*) FROM safetyevent WHERE DriverID = :id');
+$countStmt->execute(['id' => $driverId]);
+$totalRows = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $perPage;
+
 $stmt = $pdo->prepare(
-    'SELECT se.EventID, se.EventTimestamp, v.RegistrationNumber, et.EventType,
+    "SELECT se.EventID, se.EventTimestamp, v.RegistrationNumber, et.EventType,
             sev.SeverityLevel, se.ReviewState
      FROM safetyevent se
      JOIN vehicle v ON v.VIN = se.VIN
      JOIN eventtype et ON et.EventTypeID = se.EventTypeID
      JOIN eventseverity sev ON sev.SeverityID = se.SeverityID
      WHERE se.DriverID = :id
-     ORDER BY se.EventTimestamp DESC'
+     ORDER BY se.EventTimestamp DESC
+     LIMIT $perPage OFFSET $offset"
 );
 $stmt->execute(['id' => $driverId]);
 $events = $stmt->fetchAll();
@@ -57,6 +69,7 @@ function severityClass(string $level): string
                 </tr>
             <?php endforeach; ?>
         </table>
+        <?= paginationControls($page, $totalPages, 'page') ?>
     <?php endif; ?>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

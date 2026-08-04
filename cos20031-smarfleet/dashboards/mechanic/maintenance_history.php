@@ -3,10 +3,13 @@ session_start();
 require_once __DIR__ . '/../../includes/require_role.php';
 requireRole(['Mechanic']);
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/pagination.php';
 
 $registration = trim($_GET['registration'] ?? '');
 $history = [];
 $vehicle = null;
+$totalPages = 1;
+$page = 1;
 
 if ($registration !== '') {
     $stmt = $pdo->prepare('SELECT VIN, RegistrationNumber, Model, Manufacturer FROM vehicle WHERE RegistrationNumber = :reg');
@@ -14,9 +17,19 @@ if ($registration !== '') {
     $vehicle = $stmt->fetch();
 
     if ($vehicle) {
+        $perPage = 10;
+        $page = currentPage('page');
+
+        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM maintenanceactivity ma JOIN maintenancejob mj ON mj.JobID = ma.JobID WHERE mj.VIN = :vin');
+        $countStmt->execute(['vin' => $vehicle['VIN']]);
+        $totalRows = (int)$countStmt->fetchColumn();
+        $totalPages = max(1, (int)ceil($totalRows / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
         // Q27 (6_business_queries.sql): vehicle maintenance / diagnostic / repair history
         $stmt = $pdo->prepare(
-            'SELECT mj.JobID, mj.DateOpened, mj.DateClosed, w.Name AS WorkshopName,
+            "SELECT mj.JobID, mj.DateOpened, mj.DateClosed, w.Name AS WorkshopName,
                     ma.ActivityID, at.ActivityType, ma.DiagnosticResult,
                     ma.RepeatedFaultFlag, ma.WarrantyFlag,
                     pa.AlertID, aty.AlertType AS LinkedAlertType
@@ -27,7 +40,8 @@ if ($registration !== '') {
              LEFT JOIN predictivealert pa ON pa.AlertID = ma.LinkedAlertID
              LEFT JOIN alerttype aty ON aty.AlertTypeID = pa.AlertTypeID
              WHERE mj.VIN = :vin
-             ORDER BY mj.DateOpened DESC, ma.ActivityID'
+             ORDER BY mj.DateOpened DESC, ma.ActivityID
+             LIMIT $perPage OFFSET $offset"
         );
         $stmt->execute(['vin' => $vehicle['VIN']]);
         $history = $stmt->fetchAll();
@@ -88,6 +102,7 @@ if ($registration !== '') {
                     </tr>
                 <?php endforeach; ?>
             </table>
+            <?= paginationControls($page, $totalPages, 'page') ?>
         <?php endif; ?>
     <?php endif; ?>
 
