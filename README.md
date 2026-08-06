@@ -2,7 +2,9 @@
 
 ## Prerequisites
 - XAMPP installed, with **Apache** and **MySQL** running.
+- Extract the GitHub ZIP file (cos20031-group2-main.zip).
 - Both project folders placed inside `C:\xampp\htdocs\`, side by side:
+  Note: You must extract cos20031-smarfleet out of the main folder and rename the parent repository folder to exactly cos20031-group2 for the path names to match.
   ```
   htdocs\
       cos20031-group2\      <- schema.sql, triggers, import.bat, seed_data\
@@ -15,15 +17,18 @@
    ```
    cd C:\xampp\htdocs\cos20031-group2
    ```
+   (Ensure your directory name matches this path exactly or the script will fail).
 3. Run:
    ```
    import.bat
    ```
 4. If it fails, it stops at the failing step and shows the exact MySQL error — fix that and re-run.
+   1.Troubleshooting: If MySQL fails to start in XAMPP, check that port 3306 is not being used by another local database instance.
 
 If your MySQL `root` user has a password, edit `import.bat`'s `set MYSQLPW=` line to `set MYSQLPW=-pYourPassword` (no space after `-p`).
 
 ## 2. Run the app
+Go to your browser and access:
 ```
 http://localhost/cos20031-smarfleet/auth/login.php
 ```
