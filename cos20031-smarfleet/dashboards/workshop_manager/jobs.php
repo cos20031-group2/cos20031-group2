@@ -19,9 +19,8 @@ function nextJobId(PDO $pdo): string
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (isset($_POST['create_job'])) {
-            $newId = nextJobId($pdo);
             $scheduleId = $_POST['schedule_id'] !== '' ? $_POST['schedule_id'] : null;
-            $vin = $_POST['vin'];
+            $vin = trim($_POST['vin']);
 
             // If a scheduled service was picked, use its VIN rather than trusting the manual field.
             if ($scheduleId !== null) {
@@ -30,14 +29,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $vin = $s->fetchColumn();
             }
 
-            $stmt = $pdo->prepare(
-                'INSERT INTO maintenancejob (JobID, VIN, WorkshopID, ScheduleID, DateOpened, Downtime)
-                 VALUES (:jobId, :vin, :workshop, :scheduleId, NOW(), 0)'
-            );
-            $stmt->execute([
-                'jobId' => $newId, 'vin' => $vin, 'workshop' => $_POST['workshop_id'], 'scheduleId' => $scheduleId,
-            ]);
-            $message = "Job opened ($newId).";
+            if ($vin === '' || $vin === false) {
+                $error = 'Please either select a scheduled service, or enter a VIN for an ad-hoc job.';
+            } else {
+                $vehicleCheck = $pdo->prepare('SELECT COUNT(*) FROM vehicle WHERE VIN = :vin');
+                $vehicleCheck->execute(['vin' => $vin]);
+                if ($vehicleCheck->fetchColumn() == 0) {
+                    $error = "No vehicle found with VIN \"$vin\". Check the VIN and try again.";
+                } else {
+                    $newId = nextJobId($pdo);
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO maintenancejob (JobID, VIN, WorkshopID, ScheduleID, DateOpened, Downtime)
+                         VALUES (:jobId, :vin, :workshop, :scheduleId, NOW(), 0)'
+                    );
+                    $stmt->execute([
+                        'jobId' => $newId, 'vin' => $vin, 'workshop' => $_POST['workshop_id'], 'scheduleId' => $scheduleId,
+                    ]);
+                    $message = "Job opened ($newId).";
+                }
+            }
         } elseif (isset($_POST['close_job'])) {
             $stmt = $pdo->prepare(
                 'UPDATE maintenancejob SET DateClosed = NOW(), Downtime = :downtime, TotalCost = :totalCost
