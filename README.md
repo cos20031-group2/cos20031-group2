@@ -1,2 +1,40 @@
-# cos20031-group2
-repo for group 2
+# Smart Fleet Management System — Local Setup
+
+## Prerequisites
+- XAMPP installed, with **Apache** and **MySQL** running.
+- Both project folders placed inside `C:\xampp\htdocs\`, side by side:
+  ```
+  htdocs\
+      cos20031-group2\      <- schema.sql, triggers, import.bat, seed_data\
+      cos20031-smarfleet\   <- the dashboard app (config\, includes\, auth\, dashboards\)
+  ```
+
+## 1. Import the database
+1. Open the **XAMPP Control Panel** → click **Shell**.
+2. `cd` into `cos20031-group2`:
+   ```
+   cd C:\xampp\htdocs\cos20031-group2
+   ```
+3. Run:
+   ```
+   import.bat
+   ```
+4. If it fails, it stops at the failing step and shows the exact MySQL error — fix that and re-run.
+
+If your MySQL `root` user has a password, edit `import.bat`'s `set MYSQLPW=` line to `set MYSQLPW=-pYourPassword` (no space after `-p`).
+
+## 2. Run the app
+```
+http://localhost/cos20031-smarfleet/auth/login.php
+```
+
+## 3. Demo accounts
+All passwords: `1234`
+
+| Role | Username |
+|---|---|
+| Driver | `DriverD0001` |
+| Mechanic | `MechanicME0001` |
+| Safety Staff | `SafetyStaff0001` |
+| Fleet Manager | `FleetManager001` |
+| Workshop Manager | `WorkshopManager001` |
