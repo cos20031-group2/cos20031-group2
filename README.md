@@ -38,3 +38,4 @@ All passwords: `1234`
 | Safety Staff | `SafetyStaff0001` |
 | Fleet Manager | `FleetManager001` |
 | Workshop Manager | `WorkshopManager001` |
+> To log in as a different role, click **Log out** first — visiting the login page while already logged in just redirects you back to your current dashboard without checking new credentials.
