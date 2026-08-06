@@ -17,7 +17,6 @@
 
 - [X] Finish `6_business_queries.sql` (the use cases)
 Comment: Finnished, needs checking and add indexes.
-- [ ] Views / transactions needed for the CRUD dashboards
 - [X] Add `Role` + `User` tables for login/dashboard access — **please decide FK pattern below before touching this**
 - [X] Indexes, once queries are final (ie., 6_business_queries.sql): identify candidate columns from actual query patterns → run `EXPLAIN` + timing before/after on the seed dataset → document a retain/discard decision per index with the measured time improvement
 
@@ -53,8 +52,8 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 
 ## ERD — Final Pass
 
-- [ ] Fold in `Role` / `User` once the FK approach above is agreed
-- [ ] Double-check weak-entity / subtype modeling reads cleanly for the rubric
+- [X] Fold in `Role` / `User` once the FK approach above is agreed
+- [X] Check weak-entity / subtype modeling reads cleanly for the rubric
 
 ---
 
