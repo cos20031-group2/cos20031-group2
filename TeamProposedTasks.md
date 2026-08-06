@@ -6,10 +6,10 @@
 
 ## Process (Confluence / Jira)
 
-- [ ] Confluence for task tracking, meeting minutes, and retrospective (required by rubric) + Jira for day-to-day board — using both or just Confluence is probably fine
-- [ ] Recurring meetings, with minutes kept live and actions assigned to named people
-- [ ] Retrospective doc, probalby updated incrementally as we go rather than written at the end. Depends on how you want to work.
-- [ ] Everyone logs their own contributions as they happen.
+- [X] Confluence for task tracking, meeting minutes, and retrospective (required by rubric) + Jira for day-to-day board — using both or just Confluence is probably fine
+- [X] Recurring meetings, with minutes kept live and actions assigned to named people
+- [X] Retrospective doc, probalby updated incrementally as we go rather than written at the end. Depends on how you want to work.
+- [X] Everyone logs their own contributions as they happen.
 
 ---
 
@@ -45,7 +45,7 @@ Con: three nullable FK columns sitting mostly empty on any given row is a bit of
 - [X] Use cases + user stories — one per stakeholder need listed in the brief's "Use of Fleet Database" section
 - [X] Seed-data generator write-up (staged design, why insert order respects the triggers, verification tooling)
 - [X] Physical model write-up (conceptual → physical translation decisions)
-- [ ] Example data per table, pulled from the actual generated seed data
+- [X] Example data per table, pulled from the actual generated seed data
 - [ ] Draw some UML diagrams (class, use case, sequence)
 
 ---
