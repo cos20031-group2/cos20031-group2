@@ -171,6 +171,6 @@ exit /b 1
 set "SCRIPT_END=!TIME!"
 call :elapsed "!SCRIPT_START!" "!SCRIPT_END!" TOTALDUR
 echo.
-echo === All done! Database "%DB%" imported successfully (%TOTAL_STEPS% files, total time !TOTALDUR!). ===
+echo === All done. Database "%DB%" imported successfully (%TOTAL_STEPS% files, total time !TOTALDUR!). ===
 pause
  
