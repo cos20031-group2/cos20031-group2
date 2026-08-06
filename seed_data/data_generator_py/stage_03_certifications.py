@@ -118,7 +118,7 @@ def generate(rng, core_state):
     # 1 eligible driver out of many, too thin for stage 5's live "as of today"
     # assignments to reliably find someone. Top up directly instead of
     # re-tuning probabilities blindly.
-    MIN_ELIGIBLE_DRIVERS = 250
+    MIN_ELIGIBLE_DRIVERS = 500
     driver_ids_all = [d["DriverID"] for d in core_state["drivers"]]
     for required in config.VEHICLE_CERT_REQUIREMENTS.values():
         eligible = [did for did in driver_ids_all if set(required).issubset(driver_cert_holdings[did])]
@@ -191,7 +191,7 @@ def generate(rng, core_state):
         mechanic_cert_holdings[mid] = held_active
 
     # Same coverage guarantee, mirrored for mechanics/activity types.
-    MIN_ELIGIBLE_MECHANICS = 50
+    MIN_ELIGIBLE_MECHANICS = 500
     mechanic_ids_all = [m["MechanicID"] for m in core_state["mechanics"]]
     activity_cert_ids = {cert_id for _, cert_id in config.ACTIVITY_TYPES.values()}
     for cert_id in activity_cert_ids:

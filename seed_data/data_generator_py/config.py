@@ -22,17 +22,17 @@ random.seed(SEED)
 # ==========================================
 # Scale (medium dataset)
 # ==========================================
-N_DEPOTS = 10
-N_VEHICLES = 250
-N_DRIVERS = 500
-N_MECHANICS = 100
+N_DEPOTS = 12
+N_VEHICLES = 1000
+N_DRIVERS = 2000
+N_MECHANICS = 1000
 
 # ==========================================
-# Date window: 12 months ending today, with some
+# Date window: 48 months ending today, with some
 # records deliberately left mid-lifecycle as of TODAY.
 # ==========================================
 TODAY = date.today()
-WINDOW_START = TODAY - relativedelta(months=12)
+WINDOW_START = TODAY - relativedelta(months=48)  # 4 years ago, inclusive
 
 # Some generators (VehicleAssignment count, PredictiveAlert count, standalone
 # ScheduledService count, per-vehicle MaintenanceJob target) compute a fixed

@@ -23,7 +23,7 @@ def generate(rng, faker):
     state = {}
 
     # ---------- SafetyStaff ----------
-    n_staff = 100
+    n_staff = 500
     staff_rows = []
     for i in range(1, n_staff + 1):
         staff_rows.append({
@@ -36,7 +36,7 @@ def generate(rng, faker):
     state["safety_staff_ids"] = [r["ReviewStaffID"] for r in staff_rows]
 
     # ---------- Supplier ----------
-    n_suppliers = 20
+    n_suppliers = 100
     supplier_rows = []
     for i in range(1, n_suppliers + 1):
         supplier_rows.append({
@@ -90,15 +90,15 @@ def generate(rng, faker):
     # For each part, randomly assign 1 primary supplier and 4-8 backup suppliers.
     ps_rows = []
     for part_no in state["part_numbers"]:
-        # Randomly decide the number of backup suppliers (4, 6, or 8) with weighted probabilities.
+        # Randomly decide the number of backup suppliers (6, 8, or 10) with weighted probabilities.
         # Using randint for broader compatibility with different RNG objects
         rand_val = rng.randint(1, 10)
         if rand_val <= 5:
-            num_backups = 4
-        elif rand_val <= 8:
             num_backups = 6
-        else:
+        elif rand_val <= 8:
             num_backups = 8
+        else:
+            num_backups = 10
             
         # Ensure we don't try to sample more suppliers than exist
         num_suppliers = min(1 + num_backups, len(state["supplier_ids"]))
