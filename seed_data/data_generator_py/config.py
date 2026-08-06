@@ -32,7 +32,7 @@ N_MECHANICS = 1000
 # records deliberately left mid-lifecycle as of TODAY.
 # ==========================================
 TODAY = date.today()
-WINDOW_START = TODAY - relativedelta(months=48)  # 4 years ago, inclusive
+WINDOW_START = TODAY - relativedelta(months=24)
 
 # Some generators (VehicleAssignment count, PredictiveAlert count, standalone
 # ScheduledService count, per-vehicle MaintenanceJob target) compute a fixed
