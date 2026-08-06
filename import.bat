@@ -61,66 +61,70 @@ echo [1/16] schema.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\schema.sql"
 if errorlevel 1 goto :error
 
-echo [2/16] 1_vehicle_assignment_triggers.sql
+echo [2/17] approved_indexes.sql
+mysql -u root %MYSQLPW% %DB% < "%BASE%\approved_indexes.sql"
+if errorlevel 1 goto :error
+
+echo [3/17] 1_vehicle_assignment_triggers.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\1_vehicle_assignment_triggers.sql"
 if errorlevel 1 goto :error
 
-echo [3/16] 2_maintenance_and_alert_triggers.sql
+echo [4/17] 2_maintenance_and_alert_triggers.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\2_maintenance_and_alert_triggers.sql"
 if errorlevel 1 goto :error
 
-echo [4/16] 3_driver_eligibility_and_safety_event_triggers.sql
+echo [5/17] 3_driver_eligibility_and_safety_event_triggers.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\3_driver_eligibility_and_safety_event_triggers.sql"
 if errorlevel 1 goto :error
 
-echo [5/16] 4_review_coaching_and_scoring_triggers.sql
+echo [6/17] 4_review_coaching_and_scoring_triggers.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\4_review_coaching_and_scoring_triggers.sql"
 if errorlevel 1 goto :error
 
-echo [6/16] 5_workshop_operations_triggers.sql
+echo [7/17] 5_workshop_operations_triggers.sql
 mysql -u root %MYSQLPW% %DB% < "%BASE%\5_workshop_operations_triggers.sql"
 if errorlevel 1 goto :error
 
 echo.
 echo === Importing seed data ===
 
-echo [7/16] 01_reference.sql
+echo [8/17] 01_reference.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\01_reference.sql"
 if errorlevel 1 goto :error
 
-echo [8/16] 02_core_entities.sql
+echo [9/17] 02_core_entities.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\02_core_entities.sql"
 if errorlevel 1 goto :error
 
-echo [9/16] 03_certifications.sql
+echo [10/17] 03_certifications.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\03_certifications.sql"
 if errorlevel 1 goto :error
 
-echo [10/16] 04_score_init.sql
+echo [11/17] 04_score_init.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\04_score_init.sql"
 if errorlevel 1 goto :error
 
-echo [11/16] 05_vehicle_assignments.sql
+echo [12/17] 05_vehicle_assignments.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\05_vehicle_assignments.sql"
 if errorlevel 1 goto :error
 
-echo [12/16] 06_alerts_schedules.sql
+echo [13/17] 06_alerts_schedules.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\06_alerts_schedules.sql"
 if errorlevel 1 goto :error
 
-echo [13/16] 07_maintenance.sql
+echo [14/17] 07_maintenance.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\07_maintenance.sql"
 if errorlevel 1 goto :error
 
-echo [14/16] 08_safety_events.sql
+echo [15/17] 08_safety_events.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\08_safety_events.sql"
 if errorlevel 1 goto :error
 
-echo [15/16] 09_reviews_coaching.sql
+echo [16/17] 09_reviews_coaching.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\09_reviews_coaching.sql"
 if errorlevel 1 goto :error
 
-echo [16/16] 10_app_users.sql
+echo [17/17] 10_app_users.sql
 mysql -u root %MYSQLPW% %DB% < "%SEED%\10_app_users.sql"
 if errorlevel 1 goto :error
 
